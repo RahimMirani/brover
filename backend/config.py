@@ -16,15 +16,20 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 # -----------------------------------------------------------------------------
-# Secrets + models (from .env)
+# Secrets (from .env)
 # -----------------------------------------------------------------------------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-5")
-OPENAI_STT_MODEL = os.getenv("OPENAI_STT_MODEL", "gpt-4o-mini-transcribe")
-OPENAI_TTS_MODEL = os.getenv("OPENAI_TTS_MODEL", "gpt-4o-mini-tts")
-OPENAI_TTS_VOICE = os.getenv("OPENAI_TTS_VOICE", "alloy")
+
+# -----------------------------------------------------------------------------
+# Model + voice choices
+# -----------------------------------------------------------------------------
+CLAUDE_MODEL = "claude-sonnet-4-5"
+OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+# Voice options for OpenAI TTS: alloy, echo, fable, onyx, nova, shimmer
+OPENAI_TTS_VOICE = "alloy"
 
 
 # -----------------------------------------------------------------------------
