@@ -26,7 +26,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 # Model + voice choices
 # -----------------------------------------------------------------------------
 CLAUDE_MODEL = "claude-sonnet-4-5"
-OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"
+OPENAI_STT_MODEL = "whisper-1"
 OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 # Voice options for OpenAI TTS: alloy, echo, fable, onyx, nova, shimmer
 OPENAI_TTS_VOICE = "alloy"

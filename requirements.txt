@@ -5,3 +5,4 @@ anthropic
 openai
 gpiozero
 python-dotenv
+lgpio
