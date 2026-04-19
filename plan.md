@@ -60,3 +60,9 @@ Three logical components communicating over the network:
 5. Pi executes each tool call, sends status back to phone over WebSocket.
 6. Loop continues if Claude requests more actions or more sensor input.
 
+
+## GPIO pins connected to L298N
+IN1 = OutputDevice(17)   # Left motor input 1
+IN2 = OutputDevice(27)   # Left motor input 2
+IN3 = OutputDevice(22)   # Right motor input 1
+IN4 = OutputDevice(23)   # Right motor input 2
