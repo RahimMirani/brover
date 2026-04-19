@@ -12,6 +12,10 @@
   const padStop = $("padStop");
   const clock = $("clock");
   const sessionId = $("sessionId");
+  const video = $("video");
+  const zoomIn = $("zoomIn");
+  const zoomOut = $("zoomOut");
+  const zoomVal = $("zoomVal");
 
   const state = {
     sock: null,
@@ -332,6 +336,30 @@
       console.warn("audio decode failed", err);
     }
   }
+
+  /* ------------------------------------------------------------ Zoom */
+
+  const ZOOM_MIN = 1.0;
+  const ZOOM_MAX = 3.0;
+  const ZOOM_STEP = 0.25;
+  let zoom = ZOOM_MIN;
+
+  function applyZoom() {
+    video.style.transform = `scale(${zoom})`;
+    zoomVal.textContent = zoom.toFixed(2) + "x";
+    zoomIn.disabled = zoom >= ZOOM_MAX - 1e-9;
+    zoomOut.disabled = zoom <= ZOOM_MIN + 1e-9;
+  }
+
+  zoomIn.addEventListener("click", () => {
+    zoom = Math.min(ZOOM_MAX, zoom + ZOOM_STEP);
+    applyZoom();
+  });
+  zoomOut.addEventListener("click", () => {
+    zoom = Math.max(ZOOM_MIN, zoom - ZOOM_STEP);
+    applyZoom();
+  });
+  applyZoom();
 
   /* ----------------------------------------------------------- Clock */
 
