@@ -54,11 +54,11 @@ PIN_RIGHT_IN2 = 23
 # -----------------------------------------------------------------------------
 # Hard upper bound on any AI-driven timed motion call. Claude can ask for
 # forward(seconds=10) but it will be clamped to this value.
-MAX_MOTOR_SECONDS = 3.0
+MAX_MOTOR_SECONDS = 15.0
 
 # Max number of tool_use iterations per user command before the agent loop
 # aborts. Prevents runaway sequences.
-MAX_AGENT_ITERATIONS = 10
+MAX_AGENT_ITERATIONS = 30
 
 # If the phone stops sending manual-drive commands for this long while in
 # manual mode, the mode watchdog stops the motors. Matches the 180ms used
