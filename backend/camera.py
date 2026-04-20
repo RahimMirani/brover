@@ -24,6 +24,7 @@ import threading
 from typing import Optional
 
 from backend.config import CAMERA_FPS, CAMERA_HEIGHT, CAMERA_WIDTH
+from backend.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -131,8 +132,13 @@ class CameraStream:
         except Exception:
             logger.exception("camera reader thread crashed")
 
+    @property
+    def subscriber_count(self) -> int:
+        return len(self._subscribers)
+
     def _publish(self, frame: bytes) -> None:
         self.latest_jpeg = frame
+        metrics.record_frame(len(frame))
         loop = self._loop
         if loop is None or not self._running:
             return

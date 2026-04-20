@@ -35,6 +35,7 @@ from backend.config import (
     PIN_RIGHT_IN1,
     PIN_RIGHT_IN2,
 )
+from backend.metrics import metrics
 
 Direction = Literal["left", "right"]
 ManualCmd = Literal["forward", "backward", "left", "right", "stop"]
@@ -52,12 +53,14 @@ def stop() -> None:
     """Stop both motors. Safe to call at any time from any context."""
     _left.stop()
     _right.stop()
+    metrics.record_motor("stop")
 
 
 async def forward(seconds: float) -> None:
     seconds = _clamp_seconds(seconds)
     _left.forward()
     _right.forward()
+    metrics.record_motor("forward")
     try:
         await asyncio.sleep(seconds)
     finally:
@@ -68,6 +71,7 @@ async def backward(seconds: float) -> None:
     seconds = _clamp_seconds(seconds)
     _left.backward()
     _right.backward()
+    metrics.record_motor("backward")
     try:
         await asyncio.sleep(seconds)
     finally:
@@ -92,6 +96,7 @@ async def turn(direction: Direction, seconds: float) -> None:
     else:
         raise ValueError(f"direction must be 'left' or 'right', got {direction!r}")
 
+    metrics.record_motor(direction)
     try:
         await asyncio.sleep(seconds)
     finally:
@@ -119,5 +124,8 @@ def set_motion(cmd: ManualCmd) -> None:
         _right.forward()
     elif cmd == "stop":
         stop()
+        return
     else:
         raise ValueError(f"unknown manual cmd: {cmd!r}")
+
+    metrics.record_motor(cmd)

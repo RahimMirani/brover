@@ -6,3 +6,4 @@ openai
 gpiozero
 python-dotenv
 lgpio
+psutil

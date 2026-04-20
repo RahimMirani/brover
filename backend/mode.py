@@ -29,6 +29,7 @@ from typing import Literal, Optional
 
 from backend import motors
 from backend.config import MANUAL_WATCHDOG_SECONDS
+from backend.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class ModeManager:
             self.cancel_event.set()
             motors.stop()
             self._state = "idle"
+            metrics.record_mode(self._state)
 
         if self._state != "manual":
             self._enter_manual()
@@ -73,6 +75,7 @@ class ModeManager:
         motors.stop()
         self.cancel_event.clear()
         self._state = "ai"
+        metrics.record_mode(self._state)
         logger.info("mode -> ai")
 
     def enter_idle(self) -> None:
@@ -80,6 +83,7 @@ class ModeManager:
         self._cancel_watchdog()
         motors.stop()
         self._state = "idle"
+        metrics.record_mode(self._state)
         logger.info("mode -> idle")
 
     def request_estop(self) -> None:
@@ -90,12 +94,17 @@ class ModeManager:
         motors.stop()
         self.cancel_event.set()
         self._cancel_watchdog()
+        was_active = self._state != "idle"
         self._state = "idle"
+        metrics.record_mode(self._state)
+        if was_active:
+            metrics.record_estop()
         logger.info("estop -> idle")
 
     def _enter_manual(self) -> None:
         self._state = "manual"
         self._last_move_at = time.monotonic()
+        metrics.record_mode(self._state)
         self._watchdog_task = asyncio.create_task(
             self._watchdog_loop(), name="manual-watchdog"
         )
@@ -118,6 +127,7 @@ class ModeManager:
                     logger.debug("manual watchdog timeout -> idle")
                     motors.stop()
                     self._state = "idle"
+                    metrics.record_mode(self._state)
                     self._watchdog_task = None
                     return
         except asyncio.CancelledError:

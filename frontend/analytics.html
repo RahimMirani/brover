@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0a0b">
+  <title>BROVER // ANALYTICS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="analytics">
+
+    <header class="hud">
+      <div class="hud__brand">
+        <span class="hud__logo">BROVER</span>
+        <span class="hud__sep">//</span>
+        <span class="hud__sub">system analytics</span>
+      </div>
+      <div class="hud__status">
+        <a class="hud__link" href="/" aria-label="Back to ops">&lsaquo; OPS</a>
+        <span class="hud__divider"></span>
+        <span class="conn">
+          <span class="conn__dot" id="connDot"></span>
+          <span class="conn__text" id="connText">OFFLINE</span>
+        </span>
+      </div>
+    </header>
+
+    <main class="analytics__main">
+
+      <div class="banner" id="throttleBanner" data-sev="unknown">
+        <span class="banner__title" id="throttleTitle">PMIC STATUS</span>
+        <span class="banner__text"  id="throttleText">awaiting first sample...</span>
+      </div>
+
+      <section class="section">
+        <h2 class="section__title">PI HEALTH</h2>
+        <div class="grid">
+
+          <div class="card">
+            <div class="card__label">CPU TEMP</div>
+            <div class="card__value"><span id="cpuTemp">--</span><span class="card__unit">&deg;C</span></div>
+            <div class="gauge"><div class="gauge__fill" id="cpuTempBar" data-max="90"></div></div>
+            <svg class="spark" id="sparkTemp" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+          <div class="card">
+            <div class="card__label">CPU USAGE</div>
+            <div class="card__value"><span id="cpuTotal">--</span><span class="card__unit">%</span></div>
+            <div class="bars" id="cpuCores"></div>
+            <svg class="spark" id="sparkCpu" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+          <div class="card">
+            <div class="card__label">LOAD AVG</div>
+            <div class="card__value"><span id="load1">--</span></div>
+            <div class="card__sub">5m <span id="load5">--</span> &middot; 15m <span id="load15">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">ARM CLOCK</div>
+            <div class="card__value"><span id="armClock">--</span><span class="card__unit">MHz</span></div>
+            <div class="card__sub">core <span id="coreV">--</span>V &middot; max <span id="cpuFreqMax">--</span>MHz</div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">MEMORY &amp; STORAGE</h2>
+        <div class="grid">
+
+          <div class="card">
+            <div class="card__label">RAM</div>
+            <div class="card__value"><span id="memPercent">--</span><span class="card__unit">%</span></div>
+            <div class="gauge"><div class="gauge__fill" id="memBar" data-max="100"></div></div>
+            <div class="card__sub"><span id="memUsed">--</span> / <span id="memTotal">--</span> &middot; cached <span id="memCached">--</span></div>
+            <svg class="spark" id="sparkMem" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+          <div class="card">
+            <div class="card__label">SWAP</div>
+            <div class="card__value"><span id="swapPercent">--</span><span class="card__unit">%</span></div>
+            <div class="gauge"><div class="gauge__fill" id="swapBar" data-max="100"></div></div>
+            <div class="card__sub"><span id="swapUsed">--</span> / <span id="swapTotal">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">DISK /</div>
+            <div class="card__value"><span id="diskPercent">--</span><span class="card__unit">%</span></div>
+            <div class="gauge"><div class="gauge__fill" id="diskBar" data-max="100"></div></div>
+            <div class="card__sub"><span id="diskUsed">--</span> / <span id="diskTotal">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">DISK I/O</div>
+            <div class="card__value card__value--split">
+              <span><span id="diskRead">--</span><span class="card__unit">r</span></span>
+              <span class="card__value__sep">/</span>
+              <span><span id="diskWrite">--</span><span class="card__unit">w</span></span>
+            </div>
+            <svg class="spark" id="sparkDiskW" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">NETWORK</h2>
+        <div class="grid">
+
+          <div class="card">
+            <div class="card__label">NET RX</div>
+            <div class="card__value"><span id="netRx">--</span><span class="card__unit">/s</span></div>
+            <div class="card__sub">total <span id="netRxTotal">--</span></div>
+            <svg class="spark" id="sparkRx" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+          <div class="card">
+            <div class="card__label">NET TX</div>
+            <div class="card__value"><span id="netTx">--</span><span class="card__unit">/s</span></div>
+            <div class="card__sub">total <span id="netTxTotal">--</span></div>
+            <svg class="spark" id="sparkTx" viewBox="0 0 100 24" preserveAspectRatio="none" aria-hidden="true"></svg>
+          </div>
+
+          <div class="card">
+            <div class="card__label">WIFI</div>
+            <div class="card__value"><span id="wifiSignal">--</span><span class="card__unit">dBm</span></div>
+            <div class="card__sub">iface <span id="wifiIface">--</span> &middot; quality <span id="wifiQuality">--</span></div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">APPLICATION</h2>
+        <div class="grid">
+
+          <div class="card">
+            <div class="card__label">CAMERA FPS</div>
+            <div class="card__value"><span id="camFps">--</span></div>
+            <div class="card__sub">frame <span id="camFrameKb">--</span>KB &middot; dropped <span id="camDropped">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">MJPEG SUBSCRIBERS</div>
+            <div class="card__value"><span id="camSubs">--</span></div>
+            <div class="card__sub">ws clients <span id="wsClients">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">MOTOR DUTY (60s)</div>
+            <div class="card__value"><span id="motorDuty">--</span><span class="card__unit">%</span></div>
+            <div class="gauge"><div class="gauge__fill" id="motorDutyBar" data-max="100"></div></div>
+            <div class="card__sub">last cmd <span id="motorLast">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">MODE TIMESHARE (5m)</div>
+            <div class="stackbar" id="modeStack">
+              <div class="stackbar__seg" data-mode="idle"></div>
+              <div class="stackbar__seg" data-mode="manual"></div>
+              <div class="stackbar__seg" data-mode="ai"></div>
+            </div>
+            <div class="card__sub">
+              <span class="legend legend--idle">IDLE <span id="modeIdle">--</span>%</span>
+              <span class="legend legend--manual">MANUAL <span id="modeManual">--</span>%</span>
+              <span class="legend legend--ai">AI <span id="modeAi">--</span>%</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">ERRORS</div>
+            <div class="card__value"><span id="errCount">--</span></div>
+            <div class="card__sub">e-stops <span id="estopCount">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">TOOL CALLS</div>
+            <div class="kv" id="toolCalls"></div>
+          </div>
+
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section__title">PROCESSES</h2>
+        <div class="grid">
+
+          <div class="card">
+            <div class="card__label">BACKEND (python)</div>
+            <div class="card__value"><span id="selfCpu">--</span><span class="card__unit">%</span></div>
+            <div class="card__sub">pid <span id="selfPid">--</span> &middot; rss <span id="selfRss">--</span> &middot; threads <span id="selfThreads">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">RPICAM-VID</div>
+            <div class="card__value"><span id="camCpu">--</span><span class="card__unit">%</span></div>
+            <div class="card__sub">pid <span id="camPid">--</span> &middot; rss <span id="camRss">--</span></div>
+          </div>
+
+          <div class="card">
+            <div class="card__label">UPTIME</div>
+            <div class="card__value"><span id="appUptime">--</span></div>
+            <div class="card__sub">system <span id="sysUptime">--</span></div>
+          </div>
+
+        </div>
+      </section>
+
+      <footer class="analytics__foot">
+        <span>refresh 2s &middot; rolling window 5 min &middot; in-memory only</span>
+        <span class="foot__state" id="lastUpdate">--</span>
+      </footer>
+
+    </main>
+  </div>
+
+  <script src="analytics.js"></script>
+</body>
+</html>
