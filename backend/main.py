@@ -34,12 +34,13 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend import motors
 from backend.camera import camera, mjpeg_generator
 from backend.llm import run_agent
+from backend.metrics import install_error_counter, metrics
 from backend.mode import mode
 from backend.stt import transcribe
 from backend.tts import synthesize
@@ -58,11 +59,14 @@ async def lifespan(_app: FastAPI):
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
     logger.info("brover starting up")
+    install_error_counter()
     await camera.start()
+    metrics.start_sampler()
     try:
         yield
     finally:
         logger.info("brover shutting down")
+        await metrics.stop_sampler()
         motors.stop()
         await camera.stop()
 
@@ -78,9 +82,16 @@ async def stream():
     )
 
 
+@app.get("/api/metrics")
+async def api_metrics() -> JSONResponse:
+    """Latest metrics snapshot + 5-minute rolling history. Polled by /analytics."""
+    return JSONResponse(metrics.snapshot())
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
+    metrics.ws_client_connected()
     logger.info("ws client connected from %s", ws.client)
 
     async def send(msg: dict[str, Any]) -> None:
@@ -120,6 +131,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
     except Exception:
         logger.exception("ws handler crashed")
     finally:
+        metrics.ws_client_disconnected()
         mode.request_estop()
 
 
