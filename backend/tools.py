@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 from backend import camera as camera_mod
 from backend import motors
 from backend.config import MAX_MOTOR_SECONDS
+from backend.metrics import metrics
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +198,7 @@ async def dispatch(name: str, arguments: dict[str, Any]) -> ToolResult:
     handler = TOOL_REGISTRY.get(name)
     if handler is None:
         return _text(f"Error: unknown tool {name!r}.")
+    metrics.record_tool(name)
     try:
         return await handler(**arguments)
     except TypeError as e:
