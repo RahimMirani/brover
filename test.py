@@ -24,6 +24,13 @@ IN2 = OutputDevice(27)
 IN3 = OutputDevice(22)   # Right motor
 IN4 = OutputDevice(23)
 
+# gpio ultra sonic sensor ports:
+# gpio 24 is the trigger pin
+# gpio 25 echo
+## incase this does not work, swap the ports 
+# make a compensation for sound and humidity 
+
+
 # ---------------------------------
 # Motor controls
 # ---------------------------------
