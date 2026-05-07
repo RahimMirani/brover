@@ -16,6 +16,7 @@
   const zoomIn = $("zoomIn");
   const zoomOut = $("zoomOut");
   const zoomVal = $("zoomVal");
+  const modelPicker = $("modelPicker");
 
   const state = {
     sock: null,
@@ -28,6 +29,8 @@
     audioStream: null,
     audioUnlocked: false,
     entries: 0,
+    models: [],
+    currentModel: "",
   };
 
   sessionId.textContent =
@@ -44,6 +47,7 @@
       state.connected = true;
       connDot.setAttribute("data-on", "");
       connText.textContent = "ONLINE";
+      sendSelectedModel();
     });
 
     state.sock.addEventListener("message", (ev) => {
@@ -84,6 +88,9 @@
       case "mode":
         setMode(msg.state);
         break;
+      case "model":
+        setCurrentModel(msg.model || "");
+        break;
       case "transcript":
         appendLog("usr", msg.text ? `"${msg.text}"` : "(silence)");
         break;
@@ -103,7 +110,7 @@
         break;
       }
       case "final":
-        if (msg.text) appendLog("sys", `"${msg.text}"`);
+        if (msg.text) appendLog("sys", `"${msg.text}"`, formatTelemetry(msg));
         break;
       case "audio_reply":
         playAudio(msg.data);
@@ -125,7 +132,7 @@
 
   /* -------------------------------------------------------- Log view */
 
-  function appendLog(kind, text) {
+  function appendLog(kind, text, detail = "") {
     const now = new Date();
     const t =
       String(now.getHours()).padStart(2, "0") + ":" +
@@ -140,6 +147,12 @@
       `<span class="entry__tag">${tag}</span>` +
       `<span class="entry__text"></span>`;
     el.querySelector(".entry__text").textContent = text;
+    if (detail) {
+      const detailEl = document.createElement("span");
+      detailEl.className = "entry__detail";
+      detailEl.textContent = detail;
+      el.appendChild(detailEl);
+    }
 
     logBody.appendChild(el);
     logBody.scrollTop = logBody.scrollHeight;
@@ -150,6 +163,84 @@
     state.entries += 1;
     logCount.textContent = String(state.entries).padStart(3, "0");
   }
+
+  /* ------------------------------------------------------ Model picker */
+
+  async function loadModels() {
+    try {
+      const res = await fetch("/api/models", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json();
+      state.models = Array.isArray(payload.models) ? payload.models : [];
+      renderModelOptions(payload.default_model || "");
+      sendSelectedModel();
+    } catch (err) {
+      modelPicker.innerHTML = "";
+      const opt = document.createElement("option");
+      opt.textContent = "Models unavailable";
+      modelPicker.appendChild(opt);
+      modelPicker.disabled = true;
+      appendLog("err", `model list failed: ${err.message || err}`);
+    }
+  }
+
+  function renderModelOptions(defaultModel) {
+    modelPicker.innerHTML = "";
+    state.models.forEach((model) => {
+      const opt = document.createElement("option");
+      opt.value = model.id;
+      opt.textContent = model.display_name || model.id;
+      modelPicker.appendChild(opt);
+    });
+    const selected = state.models.some((m) => m.id === defaultModel)
+      ? defaultModel
+      : (state.models[0] && state.models[0].id) || "";
+    modelPicker.value = selected;
+    state.currentModel = selected;
+    modelPicker.disabled = !selected;
+  }
+
+  function setCurrentModel(model) {
+    if (!model) return;
+    state.currentModel = model;
+    if (Array.from(modelPicker.options).some((opt) => opt.value === model)) {
+      modelPicker.value = model;
+    }
+  }
+
+  function sendSelectedModel() {
+    const model = modelPicker.value || state.currentModel;
+    if (model) send({ type: "set_model", model });
+  }
+
+  function modelLabel(modelId) {
+    const model = state.models.find((m) => m.id === modelId);
+    return (model && model.display_name) || modelId || "model";
+  }
+
+  function formatTokens(n) {
+    const value = Number(n) || 0;
+    if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}K`;
+    return String(value);
+  }
+
+  function formatTelemetry(msg) {
+    if (!msg.model) return "";
+    const seconds = ((Number(msg.latency_ms) || 0) / 1000).toFixed(1);
+    const cost = (Number(msg.cost_usd) || 0).toFixed(4);
+    return [
+      modelLabel(msg.model),
+      `${msg.iterations || 0} iter`,
+      `${seconds}s`,
+      `${formatTokens(msg.input_tokens)} in / ${formatTokens(msg.output_tokens)} out`,
+      `$${cost}`,
+    ].join(" · ");
+  }
+
+  modelPicker.addEventListener("change", () => {
+    state.currentModel = modelPicker.value;
+    sendSelectedModel();
+  });
 
   /* ------------------------------------------------------- Manual drive */
 
@@ -375,5 +466,6 @@
 
   /* ----------------------------------------------------------- Boot */
 
+  loadModels();
   connect();
 })();

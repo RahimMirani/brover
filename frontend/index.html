@@ -70,14 +70,23 @@
         <button class="pad pad--down"  data-cmd="backward" aria-label="Backward"><svg viewBox="0 0 24 24"><path d="M12 19l9-9h-6V5H9v5H3z"/></svg></button>
       </div>
 
-      <button class="mic" id="micBtn" aria-label="Hold to talk">
-        <span class="mic__ring"></span>
-        <span class="mic__ring mic__ring--2"></span>
-        <span class="mic__core">
-          <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2z"/></svg>
-        </span>
-        <span class="mic__label">HOLD &middot; TALK</span>
-      </button>
+      <div class="ai-panel">
+        <label class="model-picker" for="modelPicker">
+          <span class="model-picker__label">MODEL</span>
+          <select class="model-picker__select" id="modelPicker" disabled>
+            <option>Loading models...</option>
+          </select>
+        </label>
+
+        <button class="mic" id="micBtn" aria-label="Hold to talk">
+          <span class="mic__ring"></span>
+          <span class="mic__ring mic__ring--2"></span>
+          <span class="mic__core">
+            <svg viewBox="0 0 24 24"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2z"/></svg>
+          </span>
+          <span class="mic__label">HOLD &middot; TALK</span>
+        </button>
+      </div>
 
       <button class="estop" id="estopBtn" aria-label="Emergency stop">
         <span class="estop__ring"></span>

@@ -82,6 +82,11 @@ class _AppState:
     last_frame_size_bytes: int = 0
     camera_frames_dropped: int = 0
     tool_calls: Counter = field(default_factory=Counter)
+    llm_calls_per_model: Counter = field(default_factory=Counter)
+    llm_latency_ms_per_model: Counter = field(default_factory=Counter)
+    llm_input_tokens_per_model: Counter = field(default_factory=Counter)
+    llm_output_tokens_per_model: Counter = field(default_factory=Counter)
+    llm_cost_usd_per_model: dict[str, float] = field(default_factory=dict)
     mode_current: str = "idle"
     frame_times: Deque[float] = field(
         default_factory=lambda: deque(maxlen=FPS_RING_SIZE)
@@ -171,6 +176,24 @@ class MetricsStore:
     # ---------------- tools -----------------
     def record_tool(self, name: str) -> None:
         self._app.tool_calls[name] += 1
+
+    # ---------------- llm -------------------
+    def record_llm_call(
+        self,
+        *,
+        model: str,
+        input_tokens: int,
+        output_tokens: int,
+        latency_ms: float,
+        cost_usd: float,
+    ) -> None:
+        self._app.llm_calls_per_model[model] += 1
+        self._app.llm_latency_ms_per_model[model] += float(latency_ms)
+        self._app.llm_input_tokens_per_model[model] += int(input_tokens)
+        self._app.llm_output_tokens_per_model[model] += int(output_tokens)
+        self._app.llm_cost_usd_per_model[model] = (
+            self._app.llm_cost_usd_per_model.get(model, 0.0) + float(cost_usd)
+        )
 
     # ---------------- errors ----------------
     def record_error(self) -> None:
@@ -416,7 +439,23 @@ class MetricsStore:
                 "estop_count": self._app.estop_count,
                 "error_count": self._app.error_count,
                 "tool_calls": dict(self._app.tool_calls),
+                "per_model": self._per_model_snapshot(),
             },
+        }
+
+    def _per_model_snapshot(self) -> dict:
+        return {
+            model: {
+                "calls": calls,
+                "avg_latency_ms": round(
+                    self._app.llm_latency_ms_per_model[model] / max(1, calls),
+                    2,
+                ),
+                "input_tokens": self._app.llm_input_tokens_per_model[model],
+                "output_tokens": self._app.llm_output_tokens_per_model[model],
+                "cost_usd": round(self._app.llm_cost_usd_per_model.get(model, 0.0), 6),
+            }
+            for model, calls in self._app.llm_calls_per_model.items()
         }
 
 
