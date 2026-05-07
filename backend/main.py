@@ -13,10 +13,12 @@ Inbound from phone:
     {"type": "ping"}                                   keepalive, no-op
     {"type": "move", "cmd": "<direction|stop>"}        manual teleop
     {"type": "estop"}                                  emergency stop
+    {"type": "set_model", "model": "..."}              select LLM model
     {"type": "audio", "data": "<base64>", "mime": "audio/webm"}
 
 Outbound to phone:
     {"type": "mode", "state": "idle|manual|ai"}
+    {"type": "model", "model": "..."}
     {"type": "transcript", "text": "..."}
     {"type": "tool_call", "name": "...", "arguments": {...}}
     {"type": "tool_result", "name": "...", "content": [...]}
@@ -37,7 +39,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import motors
+from backend import motors, registry
 from backend.camera import camera, mjpeg_generator
 from backend.llm import run_agent
 from backend.metrics import install_error_counter, metrics
@@ -88,11 +90,33 @@ async def api_metrics() -> JSONResponse:
     return JSONResponse(metrics.snapshot())
 
 
+@app.get("/api/models")
+async def api_models() -> JSONResponse:
+    """Available LLM models and the UI default."""
+    return JSONResponse(
+        {
+            "default_model": registry.DEFAULT_MODEL_ID,
+            "models": [
+                {
+                    "id": model_id,
+                    "display_name": spec.display_name,
+                    "provider": spec.provider,
+                    "supports_vision": spec.supports_vision,
+                    "input_per_mtok": spec.input_per_mtok,
+                    "output_per_mtok": spec.output_per_mtok,
+                }
+                for model_id, spec in registry.MODELS.items()
+            ],
+        }
+    )
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     metrics.ws_client_connected()
     logger.info("ws client connected from %s", ws.client)
+    current_model = registry.DEFAULT_MODEL_ID
 
     async def send(msg: dict[str, Any]) -> None:
         try:
@@ -101,6 +125,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
             pass
 
     await send({"type": "mode", "state": mode.state})
+    await send({"type": "model", "model": current_model})
 
     try:
         while True:
@@ -114,6 +139,15 @@ async def ws_endpoint(ws: WebSocket) -> None:
             t = msg.get("type")
             if t == "ping":
                 continue
+            elif t == "set_model":
+                requested_model = msg.get("model", "")
+                if requested_model not in registry.MODELS:
+                    await send(
+                        {"type": "error", "text": f"unknown model: {requested_model!r}"}
+                    )
+                    continue
+                current_model = requested_model
+                await send({"type": "model", "model": current_model})
             elif t == "move":
                 cmd = msg.get("cmd", "stop")
                 mode.on_manual_input(cmd)
@@ -122,7 +156,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
                 mode.request_estop()
                 await send({"type": "mode", "state": mode.state})
             elif t == "audio":
-                await _handle_audio(msg, send)
+                await _handle_audio(msg, send, current_model)
             else:
                 await send({"type": "error", "text": f"unknown message type: {t!r}"})
 
@@ -135,7 +169,7 @@ async def ws_endpoint(ws: WebSocket) -> None:
         mode.request_estop()
 
 
-async def _handle_audio(msg: dict[str, Any], send: Send) -> None:
+async def _handle_audio(msg: dict[str, Any], send: Send, current_model: str) -> None:
     b64 = msg.get("data", "")
     mime = msg.get("mime", "audio/webm")
     if not b64:
@@ -167,14 +201,28 @@ async def _handle_audio(msg: dict[str, Any], send: Send) -> None:
     await send({"type": "mode", "state": mode.state})
 
     try:
-        final_text = await run_agent(text, send, mode.cancel_event)
+        agent_result = await run_agent(text, send, mode.cancel_event, current_model)
+        final_text = agent_result.text
     except Exception as e:
         logger.exception("agent loop crashed")
+        agent_result = None
         final_text = f"Sorry, something went wrong: {e}"
     finally:
         mode.enter_idle()
 
-    await send({"type": "final", "text": final_text})
+    final_msg: dict[str, Any] = {"type": "final", "text": final_text}
+    if agent_result is not None:
+        final_msg.update(
+            {
+                "model": agent_result.model,
+                "latency_ms": agent_result.latency_ms,
+                "input_tokens": agent_result.input_tokens,
+                "output_tokens": agent_result.output_tokens,
+                "cost_usd": agent_result.cost_usd,
+                "iterations": agent_result.iterations,
+            }
+        )
+    await send(final_msg)
     await send({"type": "mode", "state": mode.state})
 
     if final_text:

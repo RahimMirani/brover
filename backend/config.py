@@ -20,12 +20,12 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 # -----------------------------------------------------------------------------
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+XAI_API_KEY = os.getenv("XAI_API_KEY", "")
 
 
 # -----------------------------------------------------------------------------
-# Model + voice choices
+# Voice choices
 # -----------------------------------------------------------------------------
-CLAUDE_MODEL = "claude-sonnet-4-5"
 OPENAI_STT_MODEL = "whisper-1"
 OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 # Voice options for OpenAI TTS: alloy, echo, fable, onyx, nova, shimmer
