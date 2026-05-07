@@ -1,5 +1,7 @@
 # Brover — Project Plan
 
+**Getting started:** install, env vars, and how to run the server are documented in [`README.md`](README.md). Longer-term spatial-memory strategy is in [`training_plan.md`](training_plan.md).
+
 Voice-controlled AI agent embedded in an RC car. Speak a command into a phone web app; a Raspberry Pi onboard the car interprets it through the Claude API, reasons over camera input, and drives the motors to carry it out.
 
 ---

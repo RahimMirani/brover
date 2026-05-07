@@ -1,6 +1,6 @@
 # Brover — Training & Spatial Memory Plan
 
-High-level strategy for how Brover learns and remembers its environment. Covers spatial memory, navigation, and people recognition. Companion to the main `plan.md`.
+High-level strategy for how Brover learns and remembers its environment. Covers spatial memory, navigation, and people recognition. Companion to the project overview in [`README.md`](README.md) and the architecture / hardware notes in [`plan.md`](plan.md).
 
 ---
 
