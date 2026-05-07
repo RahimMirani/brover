@@ -305,6 +305,11 @@ img { display: block; }
 .entry__time { color: var(--text-3); }
 .entry__tag { font-weight: 600; letter-spacing: 1px; }
 .entry__text { overflow-wrap: anywhere; color: var(--text-0); }
+.entry__detail {
+  grid-column: 3;
+  color: var(--text-2);
+  font-size: 10.5px;
+}
 
 .entry--usr .entry__tag { color: var(--success); }
 .entry--tol .entry__tag { color: var(--accent); }
@@ -366,6 +371,37 @@ img { display: block; }
 .pad--stop:active { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
 
 /* --- Mic --- */
+.ai-panel {
+  justify-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.model-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: var(--text-2);
+}
+.model-picker__select {
+  max-width: 180px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--bg-2);
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 0.5px;
+}
+.model-picker__select:disabled {
+  color: var(--text-3);
+  cursor: not-allowed;
+}
 .mic {
   position: relative;
   width: 112px; height: 112px;
@@ -476,6 +512,12 @@ img { display: block; }
     grid-template-rows: repeat(3, 42px);
   }
   .pad svg { width: 17px; height: 17px; }
+  .ai-panel { gap: 8px; }
+  .model-picker {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .model-picker__select { max-width: 150px; padding: 5px 6px; }
   .mic { width: 86px; height: 86px; }
   .mic__core svg { width: 24px; height: 24px; }
   .estop { width: 70px; height: 70px; font-size: 10.5px; }
