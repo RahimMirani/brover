@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 from backend import camera as camera_mod
 from backend import motors
 from backend.config import MAX_MOTOR_SECONDS
+from backend.distance_sensor import distance_sensor
 from backend.metrics import metrics
 
 logger = logging.getLogger(__name__)
@@ -75,6 +76,21 @@ async def _look() -> ToolResult:
         },
         {"type": "text", "text": "Current camera view."},
     ]
+
+
+async def _distance() -> ToolResult:
+    reading = distance_sensor.latest()
+    if reading.distance_cm is None:
+        return _text(f"No distance reading is available yet. Status: {reading.status}.")
+
+    stale_note = " Reading is stale." if reading.stale else ""
+    safety = "safe" if reading.safe_for_forward else "too close for forward motion"
+    return _text(
+        f"Forward distance is {reading.distance_cm:.1f} cm "
+        f"({safety}; minimum safe forward distance is "
+        f"{reading.min_safe_forward_cm:.1f} cm). Status: {reading.status}."
+        f"{stale_note}"
+    )
 
 
 async def _wait(seconds: float) -> ToolResult:
@@ -165,6 +181,16 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "input_schema": {"type": "object", "properties": {}},
     },
     {
+        "name": "distance",
+        "description": (
+            "Return the latest live ultrasonic distance reading straight ahead. "
+            "Use this when you need to know how far the nearest forward obstacle "
+            "is. The backend also uses this sensor automatically for forward "
+            "motion safety, so you do not need to call this before every move."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "wait",
         "description": f"Pause for a given number of seconds (max {MAX_WAIT_SECONDS}).",
         "input_schema": {
@@ -189,6 +215,7 @@ TOOL_REGISTRY: dict[str, ToolHandler] = {
     "turn": _turn,
     "stop": _stop,
     "look": _look,
+    "distance": _distance,
     "wait": _wait,
 }
 
