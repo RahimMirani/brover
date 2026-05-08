@@ -123,6 +123,19 @@ class ModeManager:
                 await asyncio.sleep(0.03)
                 if self._state != "manual":
                     return
+                blocked = motors.enforce_forward_safety()
+                if blocked is not None:
+                    if blocked.distance_cm is None:
+                        logger.info("manual forward stopped by distance sensor")
+                    else:
+                        logger.info(
+                            "manual forward stopped: obstacle at %.1f cm",
+                            blocked.distance_cm,
+                        )
+                    self._state = "idle"
+                    metrics.record_mode(self._state)
+                    self._watchdog_task = None
+                    return
                 if time.monotonic() - self._last_move_at > MANUAL_WATCHDOG_SECONDS:
                     logger.debug("manual watchdog timeout -> idle")
                     motors.stop()

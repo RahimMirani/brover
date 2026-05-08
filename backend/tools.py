@@ -36,9 +36,19 @@ def _text(msg: str) -> ToolResult:
 
 
 async def _forward(seconds: float) -> ToolResult:
-    await motors.forward(float(seconds))
-    clamped = min(float(seconds), MAX_MOTOR_SECONDS)
-    return _text(f"Drove forward for {clamped:.2f}s.")
+    result = await motors.forward(float(seconds))
+    if result.stopped_reason == "obstacle":
+        distance = (
+            "unknown distance"
+            if result.distance_cm is None
+            else f"{result.distance_cm:.1f} cm"
+        )
+        return _text(
+            "Forward motion stopped after "
+            f"{result.elapsed_seconds:.2f}s because an obstacle is ahead "
+            f"at {distance}."
+        )
+    return _text(f"Drove forward for {result.elapsed_seconds:.2f}s.")
 
 
 async def _backward(seconds: float) -> ToolResult:
