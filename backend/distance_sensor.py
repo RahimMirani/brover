@@ -112,8 +112,8 @@ class DistanceSensor:
             self._status = "unavailable"
             return
 
-        try:
-            while True:
+        while True:
+            try:
                 raw_cm = float(sensor.distance) * 100.0
                 if 0.0 < raw_cm <= ULTRASONIC_MAX_DISTANCE_CM:
                     self._samples.append(raw_cm)
@@ -123,11 +123,12 @@ class DistanceSensor:
                 else:
                     self._status = "out_of_range"
                 await asyncio.sleep(ULTRASONIC_POLL_SECONDS)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            self._status = "error"
-            logger.exception("distance sensor polling failed")
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._status = "error"
+                logger.exception("distance sensor read failed")
+                await asyncio.sleep(ULTRASONIC_POLL_SECONDS)
 
 
 distance_sensor = DistanceSensor()
