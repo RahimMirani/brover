@@ -50,6 +50,23 @@ PIN_RIGHT_IN2 = 23
 
 
 # -----------------------------------------------------------------------------
+# Ultrasonic distance sensor (BCM numbering)
+# -----------------------------------------------------------------------------
+# HC-SR04 front distance sensor. Trigger is safe from the Pi; echo is commonly
+# 5V and must be level-shifted or divided down before reaching the GPIO pin.
+PIN_ULTRASONIC_TRIGGER = 24
+PIN_ULTRASONIC_ECHO = 25
+
+# Distance readings are live safety data. They are kept in memory continuously
+# and later can be stored alongside explicit training samples.
+ULTRASONIC_MAX_DISTANCE_CM = 300.0
+ULTRASONIC_MIN_SAFE_FORWARD_CM = 25.0
+ULTRASONIC_POLL_SECONDS = 0.05
+ULTRASONIC_STALE_SECONDS = 0.5
+ULTRASONIC_SMOOTHING_SAMPLES = 5
+
+
+# -----------------------------------------------------------------------------
 # Safety caps
 # -----------------------------------------------------------------------------
 # Hard upper bound on any AI-driven timed motion call. Claude can ask for

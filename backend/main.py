@@ -31,6 +31,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -41,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import motors, registry
 from backend.camera import camera, mjpeg_generator
+from backend.distance_sensor import distance_sensor
 from backend.llm import run_agent
 from backend.metrics import install_error_counter, metrics
 from backend.mode import mode
@@ -63,6 +65,7 @@ async def lifespan(_app: FastAPI):
     logger.info("brover starting up")
     install_error_counter()
     await camera.start()
+    await distance_sensor.start()
     metrics.start_sampler()
     try:
         yield
@@ -70,6 +73,7 @@ async def lifespan(_app: FastAPI):
         logger.info("brover shutting down")
         await metrics.stop_sampler()
         motors.stop()
+        await distance_sensor.stop()
         await camera.stop()
 
 
@@ -88,6 +92,29 @@ async def stream():
 async def api_metrics() -> JSONResponse:
     """Latest metrics snapshot + 5-minute rolling history. Polled by /analytics."""
     return JSONResponse(metrics.snapshot())
+
+
+@app.get("/api/sensors")
+async def api_sensors() -> JSONResponse:
+    """Latest live hardware sensor readings."""
+    reading = distance_sensor.latest()
+    age_seconds = (
+        None
+        if reading.updated_at is None
+        else max(0.0, time.monotonic() - reading.updated_at)
+    )
+    return JSONResponse(
+        {
+            "distance": {
+                "distance_cm": reading.distance_cm,
+                "status": reading.status,
+                "stale": reading.stale,
+                "age_seconds": age_seconds,
+                "safe_for_forward": reading.safe_for_forward,
+                "min_safe_forward_cm": reading.min_safe_forward_cm,
+            }
+        }
+    )
 
 
 @app.get("/api/models")

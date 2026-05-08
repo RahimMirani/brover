@@ -10,6 +10,7 @@ For hardware, wiring, and the high-level system design, see [`plan.md`](plan.md)
 
 - **Web UI** — static frontend with voice input (WebSocket sends audio), live MJPEG preview, manual drive, AI mode, and emergency stop.
 - **AI loop** — server transcribes speech, grabs a camera frame when needed, calls the LLM API, executes returned tool calls on GPIO motors, optionally replies with synthesized speech.
+- **Distance sensing** — HC-SR04 ultrasonic sensor is read continuously for live forward distance, Claude can query it with a tool, and forward motion is stopped when an obstacle is too close.
 - **Metrics** — basic sampling and optional analytics frontend (`analytics.html`).
 - **Mode state** — idle, manual teleop, and AI-controlled operation coordinated over the socket.
 
@@ -17,7 +18,7 @@ For hardware, wiring, and the high-level system design, see [`plan.md`](plan.md)
 
 ## Requirements
 
-- **Runtime:** Raspberry Pi (project targets Pi 5, 4 GB) with CSI camera (`IMX708` in the current hardware notes), GPIO motor driver (**L298N** or similar — pin map is in [`plan.md`](plan.md)).
+- **Runtime:** Raspberry Pi (project targets Pi 5, 4 GB) with CSI camera (`IMX708` in the current hardware notes), HC-SR04 ultrasonic sensor, and GPIO motor driver (**L298N** or similar — pin map is in [`plan.md`](plan.md)).
 - **Python:** 3.10+ recommended (matches typical Pi OS images).
 - **API keys:** `.env.example` lists `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` (used for Claude, transcription, etc., per backend modules).
 
