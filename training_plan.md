@@ -93,7 +93,9 @@ A hosted DB (Supabase / Chroma) only makes sense later if multiple Brovers need 
 
 Camera-only navigation works — every step described here is pure vision plus motor odometry. Modern home robots largely run camera-based, no LIDAR.
 
-The one weak spot is fast obstacle detection in the forward path. A $2 ultrasonic sensor (HC-SR04) wired to the front of the car closes that gap with a hardware-level distance check that's faster and more reliable than any vision pipeline. Strongly recommended addition. Not strictly required for v1.
+The one weak spot is fast obstacle detection in the forward path. A $2 ultrasonic sensor (HC-SR04) wired to the front of the car closes that gap with a hardware-level distance check that's faster and more reliable than any vision pipeline. Brover should read this sensor continuously in the backend, keep the latest `distance_cm` in memory, expose it through a `distance` tool when Claude asks, and use it automatically to stop unsafe forward motion.
+
+For training, distance is metadata rather than memory by itself. During explicit place/route recording, save the latest `distance_cm` beside each captured frame/action sample. Do not rely on old stored distance readings for safety, because furniture, doors, people, boxes, and pets move; safety decisions always use the live reading.
 
 Wheel encoders or an IMU would also help — they make teach-and-repeat dramatically more robust by giving Brover real motion feedback rather than relying on motor-on-time. Pencilled in for later.
 
@@ -108,7 +110,7 @@ Wheel encoders or an IMU would also help — they make teach-and-repeat dramatic
 5. Graph navigation: shortest-path over taught routes, `find_route` and `execute_route` tools.
 6. Headings + captions per place view. `scan_room` tool.
 7. Face recognition as a separate module. New tools: `remember_person`, `recognize_faces`.
-8. Ultrasonic sensor for forward-path safety checks.
+8. Ultrasonic sensor for forward-path safety checks and per-sample training metadata.
 9. (Later) Passive memory updates, exploration mode for unmapped destinations, optional cloud backup.
 
 ---

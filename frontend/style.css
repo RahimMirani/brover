@@ -182,6 +182,15 @@ img { display: block; }
 .overlay.tr { top: 0; right: 0; }
 .overlay.bl { bottom: 0; left: 0; }
 .overlay.br { bottom: 0; right: 0; color: var(--text-1); }
+.overlay.distance {
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  color: var(--text-1);
+}
+.overlay.distance[data-status="safe"] { color: var(--success); }
+.overlay.distance[data-status="warn"] { color: var(--danger); }
+.overlay.distance[data-status="stale"] { color: var(--manual); }
 
 .rec-dot {
   width: 7px; height: 7px;

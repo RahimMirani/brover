@@ -29,6 +29,7 @@ Brover is a physical AI agent project. An RC car has its stock control electroni
 |---|---|
 | Raspberry Pi | Pi 5 4gb |
 | Camera | Connected via CSI ribbon cable, camera is IMX708|
+| Ultrasonic sensor | HC-SR04 mounted forward-facing. Backend reads it continuously, exposes latest distance to Claude, and uses it for forward-motion safety. |
 | RC car chassis | Amazon B0DJ7BT1V5. Stock radio receiver is bypassed — motors wired directly to the motor driver. |
 | Motor driver | L298N, DRV8833, or TB6612FNG. GPIO-controlled from the Pi. |
 | Power | **Pi and motors must be on separate power rails with a common ground.** Motor current spikes will brown out the Pi otherwise. Typical setup: USB power bank for the Pi, 2 18650 li-ion batteries rechargeable pack for motors. |
@@ -50,7 +51,8 @@ Three logical components communicating over the network:
                                      ┌──────────────┐
                                      │   Hardware   │
                                      │ (motors,     │
-                                     │  camera)     │
+                                     │  camera,     │
+                                     │  distance)   │
                                      └──────────────┘
 ```
 
@@ -68,3 +70,9 @@ IN1 = OutputDevice(17)   # Left motor input 1
 IN2 = OutputDevice(27)   # Left motor input 2
 IN3 = OutputDevice(22)   # Right motor input 1
 IN4 = OutputDevice(23)   # Right motor input 2
+
+## GPIO pins connected to HC-SR04 ultrasonic sensor
+TRIG = 24
+ECHO = 25
+
+The HC-SR04 echo line is commonly 5V; protect the Raspberry Pi GPIO with a resistor divider or level shifter before connecting echo to GPIO 25.

@@ -17,6 +17,7 @@
   const zoomOut = $("zoomOut");
   const zoomVal = $("zoomVal");
   const modelPicker = $("modelPicker");
+  const distanceReadout = $("distanceReadout");
 
   const state = {
     sock: null,
@@ -242,6 +243,45 @@
     sendSelectedModel();
   });
 
+  /* -------------------------------------------------------- Sensors */
+
+  function formatDistance(cm) {
+    if (cm >= 100) return `${(cm / 100).toFixed(2)}m`;
+    return `${Math.round(cm)}cm`;
+  }
+
+  function updateDistance(reading) {
+    if (!distanceReadout) return;
+    if (!reading || typeof reading.distance_cm !== "number") {
+      distanceReadout.textContent = "DIST --";
+      distanceReadout.dataset.status = "stale";
+      return;
+    }
+
+    distanceReadout.textContent = `DIST ${formatDistance(reading.distance_cm)}`;
+    if (reading.stale) {
+      distanceReadout.dataset.status = "stale";
+    } else if (!reading.safe_for_forward) {
+      distanceReadout.dataset.status = "warn";
+    } else {
+      distanceReadout.dataset.status = "safe";
+    }
+  }
+
+  async function pollSensors() {
+    try {
+      const res = await fetch("/api/sensors", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json();
+      updateDistance(payload.distance);
+    } catch (_) {
+      if (distanceReadout) {
+        distanceReadout.textContent = "DIST --";
+        distanceReadout.dataset.status = "stale";
+      }
+    }
+  }
+
   /* ------------------------------------------------------- Manual drive */
 
   function startMove(cmd) {
@@ -463,6 +503,8 @@
   }
   setInterval(tick, 1000);
   tick();
+  setInterval(pollSensors, 500);
+  pollSensors();
 
   /* ----------------------------------------------------------- Boot */
 
