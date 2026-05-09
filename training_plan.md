@@ -74,11 +74,15 @@ Hosted API, not local. Voyage AI's multimodal embedding model is the default cho
 
 Local embedding (CLIP on the Pi) is possible but burns RAM and CPU that Brover needs for other work. The API call adds 200-500ms latency, which is acceptable and is the dominant latency in the system either way.
 
+Voyage is the fourth external dependency alongside Anthropic, OpenAI, and xAI. When it's unreachable, teaching should buffer-and-retry rather than hard-fail; localization against already-stored vectors keeps working without it.
+
 ---
 
 ## Storage strategy
 
 All memory lives on the Pi in a local SQLite database with the `sqlite-vec` extension for vector similarity search. Images stored as files on disk; embeddings and metadata in SQLite.
+
+The DB file lives at `data/brover.db` on the Pi's SD card. Captured frames go to `data/captures/` with content-hash filenames (`<sha256>.jpg`) for automatic dedup, written straight from the camera's existing JPEG output without re-encoding. A soft cap on stored frames plus a `prune` command keeps the SD card from filling silently over time. The schema covers `places`, `place_views`, `routes`, `route_steps`, `people`, and `face_views`, with `sqlite-vec` virtual tables for the embeddings — created up front so later phases don't need migrations.
 
 Rationale:
 - At one-house scale (a few thousand frames, <500 MB total), local search is faster than network round-trips to a hosted DB.
@@ -97,21 +101,29 @@ The one weak spot is fast obstacle detection in the forward path. A $2 ultrasoni
 
 For training, distance is metadata rather than memory by itself. During explicit place/route recording, save the latest `distance_cm` beside each captured frame/action sample. Do not rely on old stored distance readings for safety, because furniture, doors, people, boxes, and pets move; safety decisions always use the live reading.
 
-Wheel encoders or an IMU would also help — they make teach-and-repeat dramatically more robust by giving Brover real motion feedback rather than relying on motor-on-time. Pencilled in for later.
+Wheel encoders or an IMU would also help. Time-based motor control drifts fast — the current calibration is roughly `turn(0.5s) ≈ 45°` and varies with battery level and floor surface — so teach-and-repeat in Phase 5 will lean on continuous visual re-localization between steps rather than dead reckoning. Encoders or an IMU are pencilled in for after Phase 5 if drift turns out to be the dominant failure mode.
 
 ---
 
-## Build order
+## Phases
 
-1. Embedding API client + SQLite with `sqlite-vec`. Verify embed → store → retrieve works.
-2. Teaching UI: record button, label input, frame capture loop. Teach a few places, verify localization.
-3. New tools for Claude: `localize`, `find_place`, `remember_here`. Wire into the existing agent loop.
-4. Route recording: extend teaching to capture frame + action sequences between places.
-5. Graph navigation: shortest-path over taught routes, `find_route` and `execute_route` tools.
-6. Headings + captions per place view. `scan_room` tool.
-7. Face recognition as a separate module. New tools: `remember_person`, `recognize_faces`.
-8. Ultrasonic sensor for forward-path safety checks and per-sample training metadata.
-9. (Later) Passive memory updates, exploration mode for unmapped destinations, optional cloud backup.
+Work one phase at a time. Each phase has a single goal and a clear "done" signal.
+
+**Phase 1 — Hardware and Safety [DONE].** Camera streaming, L298N motor control with safety-clamped durations, HC-SR04 ultrasonic with continuous polling and forward-motion auto-stop, WebSocket UI with manual teleop and e-stop, LLM agent loop with tool dispatch. The live `distance_cm` reading carries forward into Phase 3 as per-sample training metadata.
+
+**Phase 2 — Memory Foundation [NEXT].** Voyage embedding client + local SQLite with `sqlite-vec`. Schema covers all of `places`, `place_views`, `routes`, `route_steps`, `people`, and `face_views` so later phases don't need migrations, but only the place tables are exercised here. Deliverable is a working `embed → store → retrieve` smoke test on the Pi — no UI yet, no tools wired into Claude.
+
+**Phase 3 — Place Teaching (training pipeline v1).** Phone UI button + label input that drives the Pi to capture frames, embed them, and store as `place_views` with heading and live distance. New tools for Claude: `localize`, `find_place`, `remember_here`. After this phase, you can power Brover on, teach a few rooms in ~30 seconds each, and it will identify them — this is the moment the system can actually "begin training and make progress" on first boot.
+
+**Phase 4 — Route Recording.** Extend teaching to capture (frame, motor-action) sequences between adjacent places, stored as `routes` + `route_steps`.
+
+**Phase 5 — Graph Navigation.** Build the place/route graph in memory, run shortest-path search for unseen pairs, replay edges via teach-and-repeat with continuous visual re-localization between steps. Tools: `find_route`, `execute_route`. Critical: `execute_route` must honor the existing `cancel_event` between every step so the manual override and e-stop keep working — long-running navigation must not become a silent override.
+
+**Phase 6 — Spatial Awareness.** Multiple headings per place view + per-frame scene captions written during teaching. New tool `scan_room` answers "what's to my left?" without driving.
+
+**Phase 7 — People Recognition.** Separate face-embedding pipeline using `people` + `face_views`. Opt-in only, local only, never synced. Tools: `remember_person`, `recognize_faces`.
+
+**Phase 8 — Resilience and polish.** "I'm lost" recovery, "refresh this place" command, optional passive memory updates, optional cloud backup of `brover.db`, and a small admin endpoint for inspecting stored memory.
 
 ---
 
