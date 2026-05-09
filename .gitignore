@@ -4,3 +4,7 @@ __pycache__/
 *.pyc
 *.pyo
 .DS_Store
+
+# Per-device data: SQLite database, captured frames, backups.
+# The repo defines the schema; each device grows its own memory.
+data/
