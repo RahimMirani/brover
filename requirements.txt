@@ -7,3 +7,4 @@ gpiozero
 python-dotenv
 lgpio
 psutil
+sqlite-vec
