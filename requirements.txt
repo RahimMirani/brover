@@ -8,3 +8,5 @@ python-dotenv
 lgpio
 psutil
 sqlite-vec
+voyageai
+Pillow

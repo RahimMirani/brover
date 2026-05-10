@@ -21,6 +21,16 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 XAI_API_KEY = os.getenv("XAI_API_KEY", "")
+VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY", "")
+
+
+# -----------------------------------------------------------------------------
+# Embedding model
+# -----------------------------------------------------------------------------
+# voyage-multimodal-3 returns 1024-dim vectors in a joint image-text space.
+# If we change models here we must also drop the *_vectors virtual tables in
+# data/brover.db so they get recreated with the right dimension.
+VOYAGE_EMBED_MODEL = "voyage-multimodal-3"
 
 
 # -----------------------------------------------------------------------------
