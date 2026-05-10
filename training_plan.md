@@ -111,9 +111,9 @@ Work one phase at a time. Each phase has a single goal and a clear "done" signal
 
 **Phase 1 — Hardware and Safety [DONE].** Camera streaming, L298N motor control with safety-clamped durations, HC-SR04 ultrasonic with continuous polling and forward-motion auto-stop, WebSocket UI with manual teleop and e-stop, LLM agent loop with tool dispatch. The live `distance_cm` reading carries forward into Phase 3 as per-sample training metadata.
 
-**Phase 2 — Memory Foundation [NEXT].** Voyage embedding client + local SQLite with `sqlite-vec`. Schema covers all of `places`, `place_views`, `routes`, `route_steps`, `people`, and `face_views` so later phases don't need migrations, but only the place tables are exercised here. Deliverable is a working `embed → store → retrieve` smoke test on the Pi — no UI yet, no tools wired into Claude.
+**Phase 2 — Memory Foundation [DONE].** Voyage embedding client + local SQLite with `sqlite-vec`. Schema covers all of `places`, `place_views`, `routes`, `route_steps`, `people`, and `face_views` so later phases don't need migrations. Shipped as PR #4 (DB layer), PR #5 (Voyage client), and a memory smoke test on `main`. End-to-end Pi verification happens the next time Brover is powered on.
 
-**Phase 3 — Place Teaching (training pipeline v1).** Phone UI button + label input that drives the Pi to capture frames, embed them, and store as `place_views` with heading and live distance. New tools for Claude: `localize`, `find_place`, `remember_here`. After this phase, you can power Brover on, teach a few rooms in ~30 seconds each, and it will identify them — this is the moment the system can actually "begin training and make progress" on first boot.
+**Phase 3 — Place Teaching [NEXT — training pipeline v1].** Domain layer (`backend/teaching.py`, `backend/localization.py`) that composes camera + Voyage + SQLite. New tools for Claude: `remember_here`, `find_place`, `localize`. After this phase, the user can speak "remember this as the kitchen" or "where am I?" and Brover does the right thing. A phone-UI Teach button is a follow-up; voice-driven teaching ships first because it's the project's main interaction model anyway.
 
 **Phase 4 — Route Recording.** Extend teaching to capture (frame, motor-action) sequences between adjacent places, stored as `routes` + `route_steps`.
 
