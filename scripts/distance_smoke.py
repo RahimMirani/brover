@@ -80,11 +80,16 @@ def main() -> int:
     print(f"  pin factory       = {os.environ.get('GPIOZERO_PIN_FACTORY', 'default')}")
     print("\nReading distance... (Ctrl+C to stop)\n", flush=True)
 
+    # partial=True so .distance returns immediately with whatever the
+    # worker thread has (defaults to max_distance when no echo arrives).
+    # Without it, a stuck-HIGH echo pin makes .distance block forever
+    # waiting for a valid sample, and you only see the gpiozero warnings.
     sensor = DistanceSensor(
         echo=PIN_ULTRASONIC_ECHO,
         trigger=PIN_ULTRASONIC_TRIGGER,
         max_distance=ULTRASONIC_MAX_DISTANCE_CM / 100.0,
         queue_len=1,
+        partial=True,
     )
 
     n = 0
