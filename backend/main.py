@@ -40,8 +40,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import motors, registry
+from backend import motors, registry, teaching
 from backend.camera import camera, mjpeg_generator
+from backend.db import connection as db_connection
+from backend.db import places as places_db
 from backend.distance_sensor import distance_sensor
 from backend.llm import run_agent
 from backend.metrics import install_error_counter, metrics
@@ -66,15 +68,24 @@ async def lifespan(_app: FastAPI):
     install_error_counter()
     await camera.start()
     await distance_sensor.start()
+    db_connection.init_shared_connection()
     metrics.start_sampler()
     try:
         yield
     finally:
         logger.info("brover shutting down")
         await metrics.stop_sampler()
+        # End any orphaned tour cleanly so its background poll task doesn't
+        # outlive the camera it polls.
+        if teaching.tour_buffer.active:
+            try:
+                await teaching.tour_buffer.end()
+            except Exception:
+                logger.exception("failed to end tour cleanly during shutdown")
         motors.stop()
         await distance_sensor.stop()
         await camera.stop()
+        db_connection.close_shared_connection()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -113,6 +124,38 @@ async def api_sensors() -> JSONResponse:
                 "safe_for_forward": reading.safe_for_forward,
                 "min_safe_forward_cm": reading.min_safe_forward_cm,
             }
+        }
+    )
+
+
+@app.get("/api/places")
+async def api_places() -> JSONResponse:
+    """Names and view counts of every place Brover has been taught.
+
+    Backs both manual debugging ("what does the rover actually know?") and
+    the LLM's `find_place` answers. Returns an empty list, not an error,
+    when the DB has no places yet -- cold-start should not look like a
+    server failure.
+    """
+    try:
+        conn = db_connection.get_shared_connection()
+    except RuntimeError:
+        return JSONResponse({"places": [], "ready": False})
+
+    summaries = places_db.list_places_with_counts(conn)
+    return JSONResponse(
+        {
+            "ready": True,
+            "places": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "view_count": s.view_count,
+                    "created_at": s.created_at,
+                    "last_taught_at": s.last_taught_at,
+                }
+                for s in summaries
+            ],
         }
     )
 

@@ -1,18 +1,23 @@
 """Place CRUD: named locations and their captured frames.
 
-Phase 2 of the training pipeline. The four functions exercised here form
-the read/write surface used by the upcoming teaching UI and the `localize`
-tool the LLM will call:
+The read/write surface used by teaching, localization, and the live
+`find_place` / `forget_place` / `/api/places` tools:
 
   add_place / get_or_create_place      register a location by name
-  list_places                          enumerate known places
+  get_place_by_name                    lookup without creating
+  list_places                          enumerate known places (no counts)
+  list_places_with_counts              same + per-place view counts and
+                                       last-taught timestamp, for the UI
   add_place_view                       store one (frame, embedding) sample
   find_nearest_place_views             cosine-nearest lookup for localization
+  delete_place_by_name                 remove a place and its views/vectors
 
 Critical invariant: every row in `place_views` has exactly one matching row
 in `place_view_vectors` with the same id. `add_place_view` writes both
 inside a single transaction so the two cannot drift; if either insert
-fails, the whole pair is rolled back.
+fails, the whole pair is rolled back. `delete_place_by_name` deletes from
+the virtual vec table explicitly because vec0 has no foreign keys -- a
+cascade on the SQL side would otherwise leak orphan embeddings.
 """
 from __future__ import annotations
 
@@ -31,6 +36,17 @@ class Place:
     id: int
     name: str
     created_at: float
+
+
+@dataclass(frozen=True)
+class PlaceSummary:
+    """One row in `list_places_with_counts`. Used by the introspection API."""
+
+    id: int
+    name: str
+    created_at: float
+    view_count: int
+    last_taught_at: float | None
 
 
 @dataclass(frozen=True)
@@ -79,12 +95,57 @@ def get_or_create_place(conn: Connection, name: str) -> int:
     return add_place(conn, name)
 
 
+def get_place_by_name(conn: Connection, name: str) -> Place | None:
+    """Return the place with the given name, or None if it does not exist."""
+    row = conn.execute(
+        "SELECT id, name, created_at FROM places WHERE name = ?", (name,)
+    ).fetchone()
+    if row is None:
+        return None
+    return Place(id=int(row["id"]), name=row["name"], created_at=float(row["created_at"]))
+
+
 def list_places(conn: Connection) -> list[Place]:
     rows = conn.execute(
         "SELECT id, name, created_at FROM places ORDER BY name"
     ).fetchall()
     return [
         Place(id=int(r["id"]), name=r["name"], created_at=float(r["created_at"]))
+        for r in rows
+    ]
+
+
+def list_places_with_counts(conn: Connection) -> list[PlaceSummary]:
+    """List every place plus its view count and most recent capture timestamp.
+
+    Powers `GET /api/places` and the `find_place(name)` tool when the user
+    or the LLM wants a quick "what do you know?" answer. Places with zero
+    views still appear (an empty place can happen if teaching failed
+    after the row was created), with view_count=0 and last_taught_at=None.
+    """
+    rows = conn.execute(
+        """
+        SELECT p.id              AS id,
+               p.name            AS name,
+               p.created_at      AS created_at,
+               COUNT(pv.id)      AS view_count,
+               MAX(pv.captured_at) AS last_taught_at
+          FROM places p
+          LEFT JOIN place_views pv ON pv.place_id = p.id
+         GROUP BY p.id, p.name, p.created_at
+         ORDER BY p.name
+        """
+    ).fetchall()
+    return [
+        PlaceSummary(
+            id=int(r["id"]),
+            name=r["name"],
+            created_at=float(r["created_at"]),
+            view_count=int(r["view_count"]),
+            last_taught_at=(
+                None if r["last_taught_at"] is None else float(r["last_taught_at"])
+            ),
+        )
         for r in rows
     ]
 
@@ -168,3 +229,40 @@ def find_nearest_place_views(
         )
         for r in rows
     ]
+
+
+def delete_place_by_name(conn: Connection, name: str) -> bool:
+    """Remove a place along with its views and embeddings.
+
+    Returns True if a place was deleted, False if the name was unknown.
+
+    The SQL-side cascade on `place_views.place_id` handles the metadata,
+    but `place_view_vectors` is a `vec0` virtual table with no foreign
+    keys, so we delete the matching vector rows by id inside the same
+    transaction. Skipping that step would leak orphan embeddings -- the
+    JOIN in `find_nearest_place_views` hides them from queries but they
+    still occupy index space.
+    """
+    row = conn.execute(
+        "SELECT id FROM places WHERE name = ?", (name,)
+    ).fetchone()
+    if row is None:
+        return False
+
+    place_id = int(row["id"])
+    try:
+        conn.execute("BEGIN")
+        view_ids = [
+            int(r["id"])
+            for r in conn.execute(
+                "SELECT id FROM place_views WHERE place_id = ?", (place_id,)
+            ).fetchall()
+        ]
+        for vid in view_ids:
+            conn.execute("DELETE FROM place_view_vectors WHERE rowid = ?", (vid,))
+        conn.execute("DELETE FROM places WHERE id = ?", (place_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return True
