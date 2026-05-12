@@ -11,6 +11,12 @@ Why no migrations folder yet: at v1 the schema is small and only adds
 columns/tables. When a breaking change becomes necessary we'll introduce
 a `schema_version` table and a numbered migrations folder. Until then,
 `schema.sql` + idempotent CREATEs is enough.
+
+The shared-connection helpers (`init_shared_connection`, `get_shared_connection`,
+`close_shared_connection`) exist for the running FastAPI server, where a single
+long-lived connection is cheaper than opening one per tool call. Scripts and
+tests should call `connect()` directly with their own path so they don't
+touch the live DB.
 """
 from __future__ import annotations
 
@@ -41,17 +47,24 @@ def _ensure_dirs() -> None:
     CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def connect() -> sqlite3.Connection:
+def connect(db_path: Path | None = None) -> sqlite3.Connection:
     """Return a ready-to-use SQLite connection.
 
     On first call this creates the directory tree, the .db file, and every
     table in schema.sql. Subsequent calls are essentially free.
 
+    `db_path` defaults to the production path. Tests pass their own to keep
+    test runs from touching the live brover.db.
+
     Callers own the connection's lifetime and should close it when done.
     """
-    _ensure_dirs()
+    if db_path is None:
+        _ensure_dirs()
+        db_path = DB_PATH
+    else:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
     # FK cascades only fire when this is on; off by default in SQLite.
@@ -67,5 +80,49 @@ def connect() -> sqlite3.Connection:
     conn.executescript(schema_sql)
     conn.commit()
 
-    logger.debug("connected to %s with schema applied", DB_PATH)
+    logger.debug("connected to %s with schema applied", db_path)
     return conn
+
+
+# -----------------------------------------------------------------------------
+# Shared connection for the live FastAPI process.
+#
+# Opened once in main.py's lifespan, used by every tool handler. SQLite
+# connections aren't thread-safe by default, but every tool call runs on
+# the asyncio event loop's single thread and our queries are short, so a
+# plain module-level singleton without an asyncio.Lock is enough for v1.
+# Add a lock if a future tool starts running long DB scans concurrently
+# with writes.
+# -----------------------------------------------------------------------------
+_shared_conn: sqlite3.Connection | None = None
+
+
+def init_shared_connection() -> sqlite3.Connection:
+    """Open the live server's shared connection. Idempotent."""
+    global _shared_conn
+    if _shared_conn is None:
+        _shared_conn = connect()
+        logger.info("shared DB connection opened at %s", DB_PATH)
+    return _shared_conn
+
+
+def get_shared_connection() -> sqlite3.Connection:
+    """Return the live shared connection. Caller must have init'd it."""
+    if _shared_conn is None:
+        raise RuntimeError(
+            "shared DB connection is not initialised; "
+            "call init_shared_connection() in app startup first"
+        )
+    return _shared_conn
+
+
+def close_shared_connection() -> None:
+    """Close the live shared connection. Safe to call multiple times."""
+    global _shared_conn
+    if _shared_conn is not None:
+        try:
+            _shared_conn.close()
+        except Exception:
+            logger.exception("error closing shared DB connection")
+        _shared_conn = None
+        logger.info("shared DB connection closed")
