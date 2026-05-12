@@ -113,17 +113,24 @@ Work one phase at a time. Each phase has a single goal and a clear "done" signal
 
 **Phase 2 — Memory Foundation [DONE].** Voyage embedding client + local SQLite with `sqlite-vec`. Schema covers all of `places`, `place_views`, `routes`, `route_steps`, `people`, and `face_views` so later phases don't need migrations. Shipped as PR #4 (DB layer), PR #5 (Voyage client), and a memory smoke test on `main`. End-to-end Pi verification happens the next time Brover is powered on.
 
-**Phase 3 — Place Teaching [NEXT — training pipeline v1].** Domain layer (`backend/teaching.py`, `backend/localization.py`) that composes camera + Voyage + SQLite. New tools for Claude: `remember_here`, `find_place`, `localize`. After this phase, the user can speak "remember this as the kitchen" or "where am I?" and Brover does the right thing. A phone-UI Teach button is a follow-up; voice-driven teaching ships first because it's the project's main interaction model anyway.
+**Phase 3 — Place Teaching [NEXT — training pipeline v1].** Domain layer (`backend/teaching.py`, `backend/localization.py`) that composes camera + Voyage + SQLite, plus the live tool surface for memory. Two teaching modes, both voice-driven:
+
+- `remember_here(name)` — stop-and-say. Stationary capture of a handful of frames into one named place. Cheap, predictable, useful for one-off additions and re-teaching a single spot.
+- `start_tour` / `tag_place(name)` / `end_tour` — continuous-capture sweep. The user drives manually with the existing teleop controls and speaks place names along the way; Brover keeps a rolling buffer of recent frames and tags the most recent window when a name is spoken. One ~5-minute tour teaches a whole apartment at once instead of stopping at every spot.
+
+Read-side tools: `find_place(name)` (DB lookup, no camera), `localize()` (embed current frame, nearest-neighbor against stored views, return best match + confidence + alternatives, with explicit handling for cold start and low confidence), and `forget_place(name)` for fix-ups. A singleton SQLite connection is opened in `main.py`'s lifespan and passed through tool dispatch. A `GET /api/places` endpoint lists what's been taught so the user (and the LLM, when asked) can answer "what do you already know?". After this phase the live agent can teach, recall, and re-teach places entirely through normal conversation — no shell scripts on the live path.
 
 **Phase 4 — Route Recording.** Extend teaching to capture (frame, motor-action) sequences between adjacent places, stored as `routes` + `route_steps`.
 
 **Phase 5 — Graph Navigation.** Build the place/route graph in memory, run shortest-path search for unseen pairs, replay edges via teach-and-repeat with continuous visual re-localization between steps. Tools: `find_route`, `execute_route`. Critical: `execute_route` must honor the existing `cancel_event` between every step so the manual override and e-stop keep working — long-running navigation must not become a silent override.
 
-**Phase 6 — Spatial Awareness.** Multiple headings per place view + per-frame scene captions written during teaching. New tool `scan_room` answers "what's to my left?" without driving.
+**Phase 6 — Autonomous training mode.** Explicit mode the user activates (voice or UI). Brover drives itself using Phase 5's route-replay plus a frontier-style exploration policy, capturing views as it goes and localizing against existing memory so it doesn't re-teach the same place. Newly-discovered spots are stored as `unnamed_*` placeholders and surfaced at the end of the session for the user to label — no auto-naming from vision, that road leads to two bathrooms both called "room with a sink". Bounded by wall-clock time, a max-new-places cap, and the live ultrasonic sensor; honors `cancel_event` and the e-stop between every step the same way `execute_route` does. The "I'm already trained" check lives here too: if localization confidently recognizes every spot Brover visits in the first few minutes, the session ends early and Brover tells the user it has nothing new to learn. This is also the natural home for benchmarking memory coverage over time.
 
-**Phase 7 — People Recognition.** Separate face-embedding pipeline using `people` + `face_views`. Opt-in only, local only, never synced. Tools: `remember_person`, `recognize_faces`.
+**Phase 7 — Spatial Awareness.** Multiple headings per place view + per-frame scene captions written during teaching. New tool `scan_room` answers "what's to my left?" without driving.
 
-**Phase 8 — Resilience and polish.** "I'm lost" recovery, "refresh this place" command, optional passive memory updates, optional cloud backup of `brover.db`, and a small admin endpoint for inspecting stored memory.
+**Phase 8 — People Recognition.** Separate face-embedding pipeline using `people` + `face_views`. Opt-in only, local only, never synced. Tools: `remember_person`, `recognize_faces`.
+
+**Phase 9 — Resilience and polish.** "I'm lost" recovery, "refresh this place" command, optional passive memory updates (on-the-fly learning during normal operation — the long-term single-mode goal), optional cloud backup of `brover.db`, and a small admin endpoint for inspecting stored memory.
 
 ---
 
