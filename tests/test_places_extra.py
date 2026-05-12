@@ -1,4 +1,4 @@
-"""Tests for the Phase 3 additions to backend/db/places.py.
+"""Tests for the lookup/summary/delete helpers in backend/db/places.py.
 
 These run against a real (but per-test temp file) SQLite DB so we exercise
 sqlite-vec for real. The teaching/localization tests inherit the same

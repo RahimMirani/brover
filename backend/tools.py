@@ -8,11 +8,11 @@ Each handler returns a list of Anthropic content blocks suitable for use
 as `tool_result.content`. Most return a single text block; `look` returns
 an image block plus a short text caption.
 
-Phase 3 added memory tools (`remember_here`, `start_tour`/`tag_place`/
-`end_tour`, `find_place`, `localize`, `forget_place`). They get the
-shared DB connection lazily from `backend.db.connection.get_shared_connection`
-so they fail with a clean error message in environments where the live
-server has not initialised it (e.g. unit-test imports).
+Memory tools (`remember_here`, `start_tour`/`tag_place`/`end_tour`,
+`find_place`, `localize`, `forget_place`) get the shared DB connection
+lazily from `backend.db.connection.get_shared_connection` so they fail
+with a clean error message in environments where the live server has
+not initialised it (e.g. unit-test imports).
 """
 from __future__ import annotations
 
@@ -118,7 +118,7 @@ async def _wait(seconds: float) -> ToolResult:
 
 
 # -----------------------------------------------------------------------------
-# Memory tools (Phase 3)
+# Memory tools
 # -----------------------------------------------------------------------------
 
 _TEACH_FRAMES = 5
@@ -447,7 +447,7 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["seconds"],
         },
     },
-    # ----- Memory tools (Phase 3) ---------------------------------------------
+    # ----- Memory tools -------------------------------------------------------
     {
         "name": "remember_here",
         "description": (

@@ -1,7 +1,7 @@
 """Place teaching: the write path of Brover's spatial memory.
 
-Phase 3. Composes camera + embeddings + places DB into two flows the LLM
-exposes as tools:
+Composes camera + embeddings + places DB into two flows the LLM exposes
+as tools:
 
 - `teach_place_stationary`: stop-and-say. The rover sits still, the camera
   grabs a handful of frames, each is embedded and stored under one place

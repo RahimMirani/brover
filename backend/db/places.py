@@ -1,8 +1,7 @@
 """Place CRUD: named locations and their captured frames.
 
-Phase 2 introduced the write/query primitives. Phase 3 added the lookup
-and lifecycle helpers used by the live `find_place`, `forget_place`, and
-`/api/places` surfaces:
+The read/write surface used by teaching, localization, and the live
+`find_place` / `forget_place` / `/api/places` tools:
 
   add_place / get_or_create_place      register a location by name
   get_place_by_name                    lookup without creating

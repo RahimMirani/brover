@@ -1,8 +1,8 @@
 """Place localization: the read path of Brover's spatial memory.
 
-Phase 3. Given a current camera frame, embed it and ask the places DB
-which stored views are closest. Turn that raw distance list into a four-
-state answer the agent can act on:
+Given a current camera frame, embed it and ask the places DB which
+stored views are closest. Turn that raw distance list into a four-state
+answer the agent can act on:
 
   "empty_memory"  the DB has no place views yet. Agent should ask the
                   user to teach somewhere first.
