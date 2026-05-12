@@ -22,10 +22,10 @@ import logging
 from typing import Any, Awaitable, Callable
 
 from backend import camera as camera_mod
-from backend import captures, embeddings, localization, motors, teaching
+from backend import captures, embeddings, localization, motors, route_recording, teaching
 from backend.config import MAX_MOTOR_SECONDS
 from backend.db import connection as db_connection
-from backend.db import places
+from backend.db import places, routes as db_routes
 from backend.distance_sensor import distance_sensor
 from backend.metrics import metrics
 
@@ -340,6 +340,129 @@ async def _forget_place(name: str) -> ToolResult:
     return _text(f"Forgot {name!r} and all of its stored views.")
 
 
+# -----------------------------------------------------------------------------
+# Route tools
+# -----------------------------------------------------------------------------
+
+
+async def _start_route_recording(from_place: str) -> ToolResult:
+    """Begin a route recording. The user then drives manually; each motor
+    command is captured along with one camera frame."""
+    name = (from_place or "").strip()
+    if not name:
+        return _text("Error: from_place is required.")
+
+    if route_recording.route_recorder.active:
+        return _text(
+            "A route recording is already in progress (started from "
+            f"{route_recording.route_recorder.from_place!r}). Stop it first."
+        )
+
+    if not camera_mod.camera.latest_jpeg:
+        return _text("No camera frame is available yet, cannot start recording.")
+
+    try:
+        route_recording.route_recorder.start(name, _get_jpeg)
+    except (RuntimeError, ValueError) as e:
+        return _text(f"Error: {e}.")
+
+    return _text(
+        f"Route recording started from {name!r}. Switch to manual controls "
+        "and drive me to the destination; then say 'stop recording' and "
+        "name where we ended up."
+    )
+
+
+async def _stop_route_recording(to_place: str) -> ToolResult:
+    """End the active recording. Embeds every captured frame and persists
+    the route in one transaction."""
+    name = (to_place or "").strip()
+    if not name:
+        return _text("Error: to_place is required.")
+
+    if not route_recording.route_recorder.active:
+        return _text("No route recording is currently in progress.")
+
+    try:
+        conn = db_connection.get_shared_connection()
+    except RuntimeError as e:
+        return _text(f"Error: memory not available ({e}).")
+
+    try:
+        result = await route_recording.route_recorder.stop(
+            conn,
+            name,
+            embed_image=embeddings.embed_image,
+            save_jpeg=captures.save_jpeg,
+        )
+    except route_recording.RouteRecorderEmpty:
+        return _text(
+            "Stopped recording, but no motion was captured so nothing was "
+            "saved. Try again, and remember you have to drive me by hand "
+            "between start_route_recording and stop_route_recording."
+        )
+    except embeddings.EmbeddingError as e:
+        # Recorder has already reset its state on the exception path.
+        return _text(f"Error: embedding service failed ({e}). Recording lost.")
+
+    overflowed = " (recording hit the length cap)" if result.step_count >= route_recording.DEFAULT_MAX_STEPS else ""
+    return _text(
+        f"Recorded route from {result.from_place!r} to {result.to_place!r}: "
+        f"{result.step_count} step"
+        f"{'s' if result.step_count != 1 else ''} in "
+        f"{result.duration_seconds:.0f}s{overflowed}."
+    )
+
+
+async def _find_route(from_place: str, to_place: str) -> ToolResult:
+    """Read-only lookup: is there a recorded route between two places?
+
+    Does not execute the route -- replay arrives in a later phase.
+    """
+    fname = (from_place or "").strip()
+    tname = (to_place or "").strip()
+    if not fname or not tname:
+        return _text("Error: both from_place and to_place are required.")
+
+    try:
+        conn = db_connection.get_shared_connection()
+    except RuntimeError as e:
+        return _text(f"Error: memory not available ({e}).")
+
+    matches = db_routes.find_routes_between(conn, fname, tname)
+    if not matches:
+        return _text(
+            f"I don't have a recorded route from {fname!r} to {tname!r}."
+        )
+
+    newest = matches[0]
+    note = "" if len(matches) == 1 else f" ({len(matches)} recordings total)"
+    return _text(
+        f"Yes: I have a route from {newest.from_place_name!r} to "
+        f"{newest.to_place_name!r} with {newest.step_count} step"
+        f"{'s' if newest.step_count != 1 else ''}{note}."
+    )
+
+
+async def _list_routes() -> ToolResult:
+    """Enumerate every recorded route."""
+    try:
+        conn = db_connection.get_shared_connection()
+    except RuntimeError as e:
+        return _text(f"Error: memory not available ({e}).")
+
+    summaries = db_routes.list_routes_with_step_counts(conn)
+    if not summaries:
+        return _text("I haven't recorded any routes yet.")
+
+    lines = [
+        f"{s.from_place_name} -> {s.to_place_name} ({s.step_count} step"
+        f"{'s' if s.step_count != 1 else ''})"
+        for s in summaries
+    ]
+    return _text("Recorded routes: " + "; ".join(lines) + ".")
+
+
 TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "forward",
@@ -558,6 +681,85 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             "required": ["name"],
         },
     },
+    # ----- Route tools --------------------------------------------------------
+    {
+        "name": "start_route_recording",
+        "description": (
+            "Begin recording a route from a named place. The user will then "
+            "drive the rover manually with the phone teleop controls; every "
+            "motor command they issue is captured as a step of the route, "
+            "with one camera frame per step for later re-localisation. End "
+            "the recording with stop_route_recording. Only one recording "
+            "can be active at a time. Recording is bounded by an internal "
+            f"cap of {route_recording.DEFAULT_MAX_STEPS} steps and "
+            f"{route_recording.DEFAULT_MAX_SECONDS:.0f} seconds; longer "
+            "drives auto-stop. Embedding cost is paid on stop, not while "
+            "recording."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_place": {
+                    "type": "string",
+                    "description": (
+                        "Name of the place the recording starts from. The "
+                        "place is auto-created if it does not yet exist."
+                    ),
+                }
+            },
+            "required": ["from_place"],
+        },
+    },
+    {
+        "name": "stop_route_recording",
+        "description": (
+            "End the active route recording. Every captured frame is "
+            "embedded (one Voyage call each) and the whole route is written "
+            "to the database in one transaction. Returns a brief summary "
+            "with the step count and total duration. Fails cleanly if no "
+            "recording is in progress, or if no motion was captured between "
+            "start and stop."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "to_place": {
+                    "type": "string",
+                    "description": (
+                        "Name of the place the rover ended up at. The "
+                        "place is auto-created if it does not yet exist."
+                    ),
+                }
+            },
+            "required": ["to_place"],
+        },
+    },
+    {
+        "name": "find_route",
+        "description": (
+            "Look up whether a recorded route exists between two places. "
+            "Read-only -- this does NOT drive the rover; route execution "
+            "comes in a future phase. Returns the number of stored steps "
+            "if a route exists, or a clear 'I don't have that route' "
+            "answer otherwise."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "from_place": {"type": "string", "description": "Origin."},
+                "to_place": {"type": "string", "description": "Destination."},
+            },
+            "required": ["from_place", "to_place"],
+        },
+    },
+    {
+        "name": "list_routes",
+        "description": (
+            "Enumerate every recorded route as 'from -> to (N steps)'. Use "
+            "for 'what routes do you know?'-style questions."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -576,6 +778,10 @@ TOOL_REGISTRY: dict[str, ToolHandler] = {
     "find_place": _find_place,
     "localize": _localize,
     "forget_place": _forget_place,
+    "start_route_recording": _start_route_recording,
+    "stop_route_recording": _stop_route_recording,
+    "find_route": _find_route,
+    "list_routes": _list_routes,
 }
 
 
