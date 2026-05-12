@@ -40,10 +40,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import motors, registry, teaching
+from backend import motors, registry, route_recording, teaching
 from backend.camera import camera, mjpeg_generator
 from backend.db import connection as db_connection
 from backend.db import places as places_db
+from backend.db import routes as routes_db
 from backend.distance_sensor import distance_sensor
 from backend.llm import run_agent
 from backend.metrics import install_error_counter, metrics
@@ -82,6 +83,10 @@ async def lifespan(_app: FastAPI):
                 await teaching.tour_buffer.end()
             except Exception:
                 logger.exception("failed to end tour cleanly during shutdown")
+        # Drop any in-flight route recording. We don't try to persist it on
+        # shutdown -- a half-saved route from an unexpected restart would
+        # confuse future replays more than the missing data does.
+        route_recording.route_recorder.cancel()
         motors.stop()
         await distance_sensor.stop()
         await camera.stop()
@@ -124,6 +129,36 @@ async def api_sensors() -> JSONResponse:
                 "safe_for_forward": reading.safe_for_forward,
                 "min_safe_forward_cm": reading.min_safe_forward_cm,
             }
+        }
+    )
+
+
+@app.get("/api/routes")
+async def api_routes() -> JSONResponse:
+    """Every recorded route as `from -> to (N steps)`.
+
+    Mirrors `/api/places`: returns an empty list and `ready=false` rather
+    than 500-ing when the shared DB connection has not been opened yet.
+    """
+    try:
+        conn = db_connection.get_shared_connection()
+    except RuntimeError:
+        return JSONResponse({"routes": [], "ready": False})
+
+    summaries = routes_db.list_routes_with_step_counts(conn)
+    return JSONResponse(
+        {
+            "ready": True,
+            "routes": [
+                {
+                    "id": s.id,
+                    "from_place": s.from_place_name,
+                    "to_place": s.to_place_name,
+                    "step_count": s.step_count,
+                    "created_at": s.created_at,
+                }
+                for s in summaries
+            ],
         }
     )
 

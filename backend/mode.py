@@ -30,6 +30,7 @@ from typing import Literal, Optional
 from backend import motors
 from backend.config import MANUAL_WATCHDOG_SECONDS
 from backend.metrics import metrics
+from backend.route_recording import route_recorder
 
 logger = logging.getLogger(__name__)
 
@@ -68,11 +69,22 @@ class ModeManager:
             motors.set_motion(cmd)  # type: ignore[arg-type]
         except ValueError as e:
             logger.warning("bad manual cmd %r: %s", cmd, e)
+            return
+        # Forward every accepted manual command to the route recorder; no-op
+        # when no recording is active. Sync call -- the recorder only buffers
+        # in memory here, embedding is deferred to its async stop().
+        route_recorder.on_manual_command(cmd)
 
     def enter_ai(self) -> None:
         """Transition to AI mode at the start of a voice command."""
         self._cancel_watchdog()
         motors.stop()
+        # Do not touch the route recorder here. The user's "stop recording,
+        # this is the bedroom" command itself enters AI mode, so cancelling
+        # on every AI entry would discard the very recording the LLM is
+        # about to save. The recorder only buffers in memory; AI-mode motor
+        # calls go through the tools layer, not through on_manual_input, so
+        # they never accidentally end up in the recording.
         self.cancel_event.clear()
         self._state = "ai"
         metrics.record_mode(self._state)
@@ -94,6 +106,10 @@ class ModeManager:
         motors.stop()
         self.cancel_event.set()
         self._cancel_watchdog()
+        # E-stop discards an in-flight route recording too -- the recording
+        # is tied to the user's intent to drive a known path; an emergency
+        # stop is by definition not that.
+        route_recorder.cancel()
         was_active = self._state != "idle"
         self._state = "idle"
         metrics.record_mode(self._state)
