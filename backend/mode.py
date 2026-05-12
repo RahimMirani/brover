@@ -79,9 +79,12 @@ class ModeManager:
         """Transition to AI mode at the start of a voice command."""
         self._cancel_watchdog()
         motors.stop()
-        # Recording is manual-mode only. Switching to AI abandons whatever
-        # was in flight; the user can start a new recording afterwards.
-        route_recorder.cancel()
+        # Do not touch the route recorder here. The user's "stop recording,
+        # this is the bedroom" command itself enters AI mode, so cancelling
+        # on every AI entry would discard the very recording the LLM is
+        # about to save. The recorder only buffers in memory; AI-mode motor
+        # calls go through the tools layer, not through on_manual_input, so
+        # they never accidentally end up in the recording.
         self.cancel_event.clear()
         self._state = "ai"
         metrics.record_mode(self._state)
