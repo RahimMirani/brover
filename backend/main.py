@@ -36,11 +36,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from backend import motors, registry, route_recording, teaching
+from backend import captures, embeddings, motors, registry, route_recording, teaching, training
 from backend.camera import camera, mjpeg_generator
 from backend.db import connection as db_connection
 from backend.db import places as places_db
@@ -87,6 +87,9 @@ async def lifespan(_app: FastAPI):
         # shutdown -- a half-saved route from an unexpected restart would
         # confuse future replays more than the missing data does.
         route_recording.route_recorder.cancel()
+        # Drop any pending manual-training captures. They live in RAM only
+        # so this just frees memory; no on-disk cleanup required.
+        training.pending_captures.clear()
         motors.stop()
         await distance_sensor.stop()
         await camera.stop()
@@ -212,6 +215,243 @@ async def api_models() -> JSONResponse:
                 }
                 for model_id, spec in registry.MODELS.items()
             ],
+        }
+    )
+
+
+# -----------------------------------------------------------------------------
+# Manual training: UI-driven place captures and route start/stop.
+#
+# The voice/agent path keeps its own tools (remember_here, start_tour, etc.);
+# these endpoints are the parallel UI surface. They reuse the same memory
+# primitives (embed_image, save_jpeg, places.add_place_view, route_recorder),
+# so any view stored here is indistinguishable from one stored by Claude.
+# -----------------------------------------------------------------------------
+
+
+def _get_db_or_503():
+    """Return the shared DB connection or raise 503 if not initialised yet.
+
+    Mirrors the readiness check used by /api/places and /api/routes so a
+    cold-start request gets a clear message instead of an opaque 500.
+    """
+    try:
+        return db_connection.get_shared_connection()
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=f"memory not ready: {e}")
+
+
+@app.post("/api/training/captures")
+async def api_training_capture() -> JSONResponse:
+    """Snapshot the live camera frame and hold it in the pending buffer.
+
+    Returns the capture id the UI uses for the preview, save, and discard
+    endpoints. The JPEG is never written to disk until the save call.
+    """
+    frame = camera.latest_jpeg
+    if not frame:
+        raise HTTPException(
+            status_code=503,
+            detail="camera has no frame yet; wait a moment and try again",
+        )
+
+    try:
+        item = training.pending_captures.create(frame)
+    except training.PendingCapturesFull as e:
+        raise HTTPException(status_code=429, detail=str(e))
+    except ValueError as e:
+        # Defensive: pending_captures.create rejects empty bytes, which we
+        # already filtered above. If we somehow get here, surface a 500.
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return JSONResponse(
+        {
+            "capture_id": item.id,
+            "created_at": item.created_at,
+            "expires_at": item.expires_at,
+            "byte_size": len(item.jpeg),
+        }
+    )
+
+
+@app.get("/api/training/captures/{capture_id}")
+async def api_training_capture_preview(capture_id: str) -> Response:
+    """Stream the buffered JPEG back to the UI for the preview thumbnail.
+
+    no-store keeps a previously-shown capture from being served after it's
+    been saved or discarded -- the capture_id stays in the URL, but the
+    bytes behind it should not be cached by an intermediate browser.
+    """
+    item = training.pending_captures.get(capture_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="capture not found or expired")
+    return Response(
+        content=item.jpeg,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/api/training/captures/{capture_id}/save_place")
+async def api_training_save_place(
+    capture_id: str, payload: dict = Body(...)
+) -> JSONResponse:
+    """Embed the buffered frame and store it under a place name.
+
+    Order matters: embed FIRST, then persist + pop. A Voyage failure
+    leaves the pending capture in place so the user can retry without
+    re-capturing the frame.
+    """
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+
+    item = training.pending_captures.get(capture_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="capture not found or expired")
+
+    conn = _get_db_or_503()
+
+    try:
+        vector = await embeddings.embed_image(item.jpeg)
+    except embeddings.EmbeddingError as e:
+        # Capture stays in the buffer; the UI can retry the save.
+        raise HTTPException(status_code=502, detail=f"embedding failed: {e}")
+
+    image_path = captures.save_jpeg(item.jpeg)
+    place_id = places_db.get_or_create_place(conn, name)
+    places_db.add_place_view(
+        conn,
+        place_id=place_id,
+        image_path=image_path,
+        embedding=vector,
+    )
+
+    # Only consume the pending capture after the DB write committed.
+    training.pending_captures.pop(capture_id)
+
+    summaries = {s.id: s for s in places_db.list_places_with_counts(conn)}
+    summary = summaries.get(place_id)
+    view_count = 0 if summary is None else summary.view_count
+    return JSONResponse(
+        {
+            "place_id": place_id,
+            "name": name,
+            "view_count": view_count,
+            "image_path": image_path,
+        }
+    )
+
+
+@app.delete("/api/training/captures/{capture_id}")
+async def api_training_discard(capture_id: str) -> JSONResponse:
+    """Drop a pending capture without saving. Idempotent."""
+    discarded = training.pending_captures.discard(capture_id)
+    return JSONResponse({"discarded": discarded})
+
+
+@app.post("/api/training/routes/start")
+async def api_training_route_start(payload: dict = Body(...)) -> JSONResponse:
+    """Begin a route recording driven by manual teleop.
+
+    The existing route_recorder + mode.on_manual_input wiring picks up
+    every D-pad command from here on. Nothing else changes -- this is
+    just the HTTP face of the same singleton the voice path uses.
+    """
+    from_place = (payload.get("from_place") or "").strip()
+    if not from_place:
+        raise HTTPException(status_code=400, detail="from_place is required")
+
+    if route_recording.route_recorder.active:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"a route recording from "
+                f"{route_recording.route_recorder.from_place!r} is already active"
+            ),
+        )
+
+    if not camera.latest_jpeg:
+        raise HTTPException(
+            status_code=503,
+            detail="camera has no frame yet; wait a moment and try again",
+        )
+
+    try:
+        route_recording.route_recorder.start(
+            from_place, lambda: camera.latest_jpeg
+        )
+    except (RuntimeError, ValueError) as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return JSONResponse(
+        {
+            "active": True,
+            "from_place": from_place,
+            "step_count": route_recording.route_recorder.step_count,
+        }
+    )
+
+
+@app.post("/api/training/routes/stop")
+async def api_training_route_stop(payload: dict = Body(...)) -> JSONResponse:
+    """End the active recording, embed every step, and persist the route."""
+    to_place = (payload.get("to_place") or "").strip()
+    if not to_place:
+        raise HTTPException(status_code=400, detail="to_place is required")
+
+    if not route_recording.route_recorder.active:
+        raise HTTPException(
+            status_code=409, detail="no route recording is currently active"
+        )
+
+    conn = _get_db_or_503()
+
+    try:
+        result = await route_recording.route_recorder.stop(
+            conn,
+            to_place,
+            embed_image=embeddings.embed_image,
+            save_jpeg=captures.save_jpeg,
+        )
+    except route_recording.RouteRecorderEmpty as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except embeddings.EmbeddingError as e:
+        # Recorder has already reset its state on this exception path -- the
+        # recording is lost. Surface that clearly to the UI.
+        raise HTTPException(
+            status_code=502, detail=f"embedding failed; recording lost: {e}"
+        )
+
+    return JSONResponse(
+        {
+            "route_id": result.route_id,
+            "from_place": result.from_place,
+            "to_place": result.to_place,
+            "step_count": result.step_count,
+            "duration_seconds": result.duration_seconds,
+        }
+    )
+
+
+@app.post("/api/training/routes/cancel")
+async def api_training_route_cancel() -> JSONResponse:
+    """Drop the in-flight recording without saving. Idempotent."""
+    was_active = route_recording.route_recorder.active
+    route_recording.route_recorder.cancel()
+    return JSONResponse({"cancelled": was_active})
+
+
+@app.get("/api/training/routes/state")
+async def api_training_route_state() -> JSONResponse:
+    """Snapshot of the route recorder for the UI status badge."""
+    rec = route_recording.route_recorder
+    return JSONResponse(
+        {
+            "active": rec.active,
+            "from_place": rec.from_place,
+            "step_count": rec.step_count,
+            "overflowed": rec.overflowed,
         }
     )
 
