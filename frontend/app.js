@@ -18,6 +18,24 @@
   const zoomVal = $("zoomVal");
   const modelPicker = $("modelPicker");
   const distanceReadout = $("distanceReadout");
+  const trainToggle = $("trainToggle");
+  const trainPanel = $("trainPanel");
+  const trainClose = $("trainClose");
+  const captureBtn = $("captureBtn");
+  const captureList = $("captureList");
+  const capturePending = $("capturePending");
+  const placeNamesList = $("placeNames");
+  const routeStatus = $("routeStatus");
+  const routeFromInput = $("routeFromInput");
+  const routeStartBtn = $("routeStartBtn");
+  const routeToInput = $("routeToInput");
+  const routeStopBtn = $("routeStopBtn");
+  const routeCancelBtn = $("routeCancelBtn");
+  const memoryRefresh = $("memoryRefresh");
+  const placesList = $("placesList");
+  const placesCount = $("placesCount");
+  const routesList = $("routesList");
+  const routesCount = $("routesCount");
 
   const state = {
     sock: null,
@@ -32,6 +50,13 @@
     entries: 0,
     models: [],
     currentModel: "",
+    train: {
+      open: false,
+      pending: new Map(),
+      placeNames: [],
+      pollTimer: null,
+      routeActive: false,
+    },
   };
 
   sessionId.textContent =
@@ -505,6 +530,381 @@
   tick();
   setInterval(pollSensors, 500);
   pollSensors();
+
+  /* -------------------------------------------------------- Training */
+
+  // The training panel is a parallel UI surface to the voice/agent flow:
+  // user drives with WASD/D-pad (unchanged), clicks CAPTURE here, then
+  // names the frame and saves. Routes work the same way -- this just hits
+  // the existing route_recorder via HTTP instead of via Claude.
+
+  function openTrain() {
+    if (state.train.open) return;
+    state.train.open = true;
+    trainPanel.hidden = false;
+    trainToggle.setAttribute("aria-pressed", "true");
+    refreshMemory();
+    pollRouteState();
+    state.train.pollTimer = setInterval(() => {
+      pollRouteState();
+    }, 1500);
+  }
+
+  function closeTrain() {
+    if (!state.train.open) return;
+    state.train.open = false;
+    trainPanel.hidden = true;
+    trainToggle.setAttribute("aria-pressed", "false");
+    if (state.train.pollTimer) {
+      clearInterval(state.train.pollTimer);
+      state.train.pollTimer = null;
+    }
+  }
+
+  trainToggle.addEventListener("click", () => {
+    if (state.train.open) closeTrain(); else openTrain();
+  });
+  trainClose.addEventListener("click", closeTrain);
+
+  async function captureFrame() {
+    if (!state.train.open) return;
+    captureBtn.disabled = true;
+    try {
+      const res = await fetch("/api/training/captures", { method: "POST" });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => res.statusText);
+        appendLog("err", `capture failed (${res.status}): ${msg}`);
+        return;
+      }
+      const payload = await res.json();
+      addPendingCard(payload.capture_id);
+      appendLog("trn", `captured frame ${payload.capture_id.slice(0, 8)}`);
+    } catch (err) {
+      appendLog("err", `capture failed: ${err.message || err}`);
+    } finally {
+      captureBtn.disabled = false;
+    }
+  }
+
+  function addPendingCard(captureId) {
+    const card = document.createElement("div");
+    card.className = "capture-card";
+    card.dataset.id = captureId;
+    card.innerHTML =
+      `<img class="capture-card__thumb" src="/api/training/captures/${captureId}" alt="pending capture">` +
+      `<div class="capture-card__body">` +
+      `  <input class="capture-card__input" list="placeNames" placeholder="place name" autocomplete="off">` +
+      `  <div class="capture-card__actions">` +
+      `    <button class="capture-card__btn capture-card__btn--save">SAVE</button>` +
+      `    <button class="capture-card__btn capture-card__btn--discard">DISCARD</button>` +
+      `  </div>` +
+      `</div>`;
+
+    const input = card.querySelector(".capture-card__input");
+    const saveBtn = card.querySelector(".capture-card__btn--save");
+    const discardBtn = card.querySelector(".capture-card__btn--discard");
+
+    const doSave = () => savePending(captureId, input.value.trim(), card);
+    saveBtn.addEventListener("click", doSave);
+    discardBtn.addEventListener("click", () => discardPending(captureId, card));
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        doSave();
+      }
+    });
+
+    captureList.prepend(card);
+    state.train.pending.set(captureId, card);
+    updatePendingCount();
+    setTimeout(() => input.focus(), 0);
+  }
+
+  async function savePending(captureId, name, card) {
+    if (!name) {
+      appendLog("err", "place name is required");
+      return;
+    }
+    const saveBtn = card.querySelector(".capture-card__btn--save");
+    const discardBtn = card.querySelector(".capture-card__btn--discard");
+    card.dataset.saving = "true";
+    saveBtn.disabled = true;
+    discardBtn.disabled = true;
+    try {
+      const res = await fetch(
+        `/api/training/captures/${captureId}/save_place`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name }),
+        }
+      );
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        appendLog("err", `save failed (${res.status}): ${detail}`);
+        return;
+      }
+      const payload = await res.json();
+      appendLog(
+        "trn",
+        `saved ${payload.name} (now ${payload.view_count} view${
+          payload.view_count === 1 ? "" : "s"
+        })`
+      );
+      removeCard(captureId);
+      refreshMemory();
+    } catch (err) {
+      appendLog("err", `save failed: ${err.message || err}`);
+    } finally {
+      delete card.dataset.saving;
+      saveBtn.disabled = false;
+      discardBtn.disabled = false;
+    }
+  }
+
+  async function discardPending(captureId, card) {
+    try {
+      await fetch(`/api/training/captures/${captureId}`, { method: "DELETE" });
+    } catch (_) {
+      // even if delete fails, drop the card from the UI
+    }
+    removeCard(captureId);
+    appendLog("trn", `discarded capture ${captureId.slice(0, 8)}`);
+  }
+
+  function removeCard(captureId) {
+    const card = state.train.pending.get(captureId);
+    if (card && card.parentNode) card.parentNode.removeChild(card);
+    state.train.pending.delete(captureId);
+    updatePendingCount();
+  }
+
+  function updatePendingCount() {
+    const n = state.train.pending.size;
+    capturePending.textContent = `${n} pending`;
+  }
+
+  captureBtn.addEventListener("click", captureFrame);
+
+  document.addEventListener("keydown", (e) => {
+    if (!state.train.open) return;
+    if (e.key !== "c" && e.key !== "C") return;
+    if (e.repeat) return;
+    const tag = e.target && e.target.tagName;
+    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    e.preventDefault();
+    captureFrame();
+  });
+
+  /* --- Route recording controls --- */
+
+  async function startRouteRecording() {
+    const from = routeFromInput.value.trim();
+    if (!from) {
+      appendLog("err", "route: from_place is required");
+      return;
+    }
+    routeStartBtn.disabled = true;
+    try {
+      const res = await fetch("/api/training/routes/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from_place: from }),
+      });
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        appendLog("err", `route start failed (${res.status}): ${detail}`);
+        return;
+      }
+      appendLog("trn", `route recording started from ${from}`);
+      pollRouteState();
+    } catch (err) {
+      appendLog("err", `route start failed: ${err.message || err}`);
+    } finally {
+      routeStartBtn.disabled = false;
+    }
+  }
+
+  async function stopRouteRecording() {
+    const to = routeToInput.value.trim();
+    if (!to) {
+      appendLog("err", "route: to_place is required");
+      return;
+    }
+    routeStopBtn.disabled = true;
+    try {
+      const res = await fetch("/api/training/routes/stop", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to_place: to }),
+      });
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        appendLog("err", `route stop failed (${res.status}): ${detail}`);
+        return;
+      }
+      const payload = await res.json();
+      appendLog(
+        "trn",
+        `route saved: ${payload.from_place} -> ${payload.to_place} (${payload.step_count} steps)`
+      );
+      routeFromInput.value = "";
+      routeToInput.value = "";
+      pollRouteState();
+      refreshMemory();
+    } catch (err) {
+      appendLog("err", `route stop failed: ${err.message || err}`);
+    } finally {
+      routeStopBtn.disabled = false;
+    }
+  }
+
+  async function cancelRouteRecording() {
+    try {
+      const res = await fetch("/api/training/routes/cancel", { method: "POST" });
+      if (res.ok) {
+        const payload = await res.json();
+        if (payload.cancelled) appendLog("trn", "route recording cancelled");
+      }
+    } catch (_) {}
+    pollRouteState();
+  }
+
+  routeStartBtn.addEventListener("click", startRouteRecording);
+  routeStopBtn.addEventListener("click", stopRouteRecording);
+  routeCancelBtn.addEventListener("click", cancelRouteRecording);
+
+  async function pollRouteState() {
+    try {
+      const res = await fetch("/api/training/routes/state", { cache: "no-store" });
+      if (!res.ok) return;
+      const payload = await res.json();
+      renderRouteState(payload);
+    } catch (_) {
+      // network blip; UI keeps its previous state.
+    }
+  }
+
+  function renderRouteState(s) {
+    const active = !!s.active;
+    const overflowed = !!s.overflowed;
+    state.train.routeActive = active;
+
+    if (overflowed) {
+      routeStatus.dataset.state = "overflowed";
+      routeStatus.textContent = `OVERFLOW ${s.step_count}`;
+    } else if (active) {
+      routeStatus.dataset.state = "recording";
+      routeStatus.textContent = `REC ${s.from_place} \u00b7 ${s.step_count}`;
+    } else {
+      routeStatus.dataset.state = "idle";
+      routeStatus.textContent = "IDLE";
+    }
+
+    routeFromInput.disabled = active;
+    routeStartBtn.disabled = active;
+    routeToInput.disabled = !active;
+    routeStopBtn.disabled = !active;
+    routeCancelBtn.disabled = !active;
+  }
+
+  /* --- Memory lists + autocomplete --- */
+
+  memoryRefresh.addEventListener("click", refreshMemory);
+
+  async function refreshMemory() {
+    await Promise.all([refreshPlaces(), refreshRoutes()]);
+  }
+
+  async function refreshPlaces() {
+    try {
+      const res = await fetch("/api/places", { cache: "no-store" });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const places = Array.isArray(payload.places) ? payload.places : [];
+      state.train.placeNames = places.map((p) => p.name);
+      renderPlaceNames();
+      renderPlaces(places);
+    } catch (_) {}
+  }
+
+  function renderPlaceNames() {
+    placeNamesList.innerHTML = "";
+    state.train.placeNames.forEach((name) => {
+      const opt = document.createElement("option");
+      opt.value = name;
+      placeNamesList.appendChild(opt);
+    });
+  }
+
+  function renderPlaces(places) {
+    placesCount.textContent = String(places.length);
+    placesList.innerHTML = "";
+    if (places.length === 0) {
+      const li = document.createElement("li");
+      li.className = "train__list--empty";
+      li.textContent = "no places taught yet";
+      placesList.appendChild(li);
+      return;
+    }
+    places.forEach((p) => {
+      const li = document.createElement("li");
+      li.innerHTML =
+        `<span class="train__list-name"></span>` +
+        `<span class="train__list-meta"></span>`;
+      li.querySelector(".train__list-name").textContent = p.name;
+      li.querySelector(".train__list-meta").textContent = `${p.view_count} view${
+        p.view_count === 1 ? "" : "s"
+      }`;
+      placesList.appendChild(li);
+    });
+  }
+
+  async function refreshRoutes() {
+    try {
+      const res = await fetch("/api/routes", { cache: "no-store" });
+      if (!res.ok) return;
+      const payload = await res.json();
+      const routes = Array.isArray(payload.routes) ? payload.routes : [];
+      renderRoutes(routes);
+    } catch (_) {}
+  }
+
+  function renderRoutes(routes) {
+    routesCount.textContent = String(routes.length);
+    routesList.innerHTML = "";
+    if (routes.length === 0) {
+      const li = document.createElement("li");
+      li.className = "train__list--empty";
+      li.textContent = "no routes recorded yet";
+      routesList.appendChild(li);
+      return;
+    }
+    routes.forEach((r) => {
+      const li = document.createElement("li");
+      li.innerHTML =
+        `<span class="train__list-name"></span>` +
+        `<span class="train__list-meta"></span>`;
+      li.querySelector(".train__list-name").textContent =
+        `${r.from_place} \u2192 ${r.to_place}`;
+      li.querySelector(".train__list-meta").textContent = `${r.step_count} step${
+        r.step_count === 1 ? "" : "s"
+      }`;
+      routesList.appendChild(li);
+    });
+  }
+
+  async function readErrorDetail(res) {
+    try {
+      const body = await res.json();
+      if (body && body.detail) return body.detail;
+    } catch (_) {}
+    try {
+      return await res.text();
+    } catch (_) {
+      return res.statusText;
+    }
+  }
 
   /* ----------------------------------------------------------- Boot */
 
