@@ -36,6 +36,10 @@
   const placesCount = $("placesCount");
   const routesList = $("routesList");
   const routesCount = $("routesCount");
+  const lightbox = $("lightbox");
+  const lightboxImg = $("lightboxImg");
+  const lightboxCaption = $("lightboxCaption");
+  const lightboxClose = $("lightboxClose");
 
   const state = {
     sock: null,
@@ -56,6 +60,7 @@
       placeNames: [],
       pollTimer: null,
       routeActive: false,
+      expandedPlaceIds: new Set(),
     },
   };
 
@@ -849,15 +854,160 @@
     }
     places.forEach((p) => {
       const li = document.createElement("li");
+      li.className = "place-row";
+      li.dataset.id = String(p.id);
+      const expanded = state.train.expandedPlaceIds.has(p.id);
+      if (expanded) li.dataset.expanded = "true";
       li.innerHTML =
-        `<span class="train__list-name"></span>` +
-        `<span class="train__list-meta"></span>`;
+        `<button class="place-row__head" type="button">` +
+        `  <span class="place-row__caret">${expanded ? "\u25BE" : "\u25B8"}</span>` +
+        `  <span class="train__list-name"></span>` +
+        `  <span class="train__list-meta"></span>` +
+        `</button>` +
+        `<div class="place-row__body"></div>`;
       li.querySelector(".train__list-name").textContent = p.name;
       li.querySelector(".train__list-meta").textContent = `${p.view_count} view${
         p.view_count === 1 ? "" : "s"
       }`;
+      li.querySelector(".place-row__head").addEventListener("click", () => {
+        togglePlaceRow(p.id, p.name, li);
+      });
       placesList.appendChild(li);
+      if (expanded) {
+        // Re-rendered while still expanded -- refetch so the gallery
+        // reflects whatever just happened (a save, a delete, etc.).
+        loadGallery(p.id, p.name, li);
+      }
     });
+  }
+
+  function togglePlaceRow(placeId, placeName, li) {
+    const isOpen = state.train.expandedPlaceIds.has(placeId);
+    const body = li.querySelector(".place-row__body");
+    const caret = li.querySelector(".place-row__caret");
+    if (isOpen) {
+      state.train.expandedPlaceIds.delete(placeId);
+      delete li.dataset.expanded;
+      body.innerHTML = "";
+      caret.textContent = "\u25B8";
+    } else {
+      state.train.expandedPlaceIds.add(placeId);
+      li.dataset.expanded = "true";
+      caret.textContent = "\u25BE";
+      loadGallery(placeId, placeName, li);
+    }
+  }
+
+  async function loadGallery(placeId, placeName, li) {
+    const body = li.querySelector(".place-row__body");
+    body.innerHTML = `<div class="gallery__loading">loading...</div>`;
+    try {
+      const res = await fetch(`/api/places/${placeId}/views`, {
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        body.innerHTML = `<div class="gallery__empty">failed (${res.status}): ${escapeHtml(detail)}</div>`;
+        return;
+      }
+      const payload = await res.json();
+      renderGallery(body, placeId, placeName, payload.views || []);
+    } catch (err) {
+      body.innerHTML = `<div class="gallery__empty">load error: ${escapeHtml(err.message || String(err))}</div>`;
+    }
+  }
+
+  function renderGallery(container, placeId, placeName, views) {
+    container.innerHTML = "";
+    if (views.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "gallery__empty";
+      empty.textContent = "no stored frames";
+      container.appendChild(empty);
+      return;
+    }
+    const grid = document.createElement("div");
+    grid.className = "gallery";
+    views.forEach((v) => {
+      const tile = document.createElement("div");
+      tile.className = "gallery__tile";
+      tile.dataset.viewId = String(v.id);
+      const captured = formatCapturedAt(v.captured_at);
+      tile.innerHTML =
+        `<img class="gallery__img" loading="lazy" alt="${escapeHtml(placeName)} view ${v.id}">` +
+        `<button class="gallery__delete" type="button" aria-label="Delete this view">&times;</button>` +
+        `<div class="gallery__meta">${escapeHtml(captured)}</div>`;
+      const img = tile.querySelector(".gallery__img");
+      img.src = v.image_url;
+      img.addEventListener("click", () => openLightbox(v.image_url, `${placeName} \u00b7 view ${v.id} \u00b7 ${captured}`));
+      tile.querySelector(".gallery__delete").addEventListener("click", (e) => {
+        e.stopPropagation();
+        deleteView(v.id, placeName);
+      });
+      grid.appendChild(tile);
+    });
+    container.appendChild(grid);
+  }
+
+  async function deleteView(viewId, placeName) {
+    if (!window.confirm(`Delete this view of ${placeName}? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/training/place_views/${viewId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const detail = await readErrorDetail(res);
+        appendLog("err", `delete view failed (${res.status}): ${detail}`);
+        return;
+      }
+      const payload = await res.json();
+      const fileNote = payload.file_removed ? "" : " (file still referenced)";
+      appendLog("trn", `deleted view ${viewId} from ${placeName}${fileNote}`);
+      refreshMemory();
+    } catch (err) {
+      appendLog("err", `delete view failed: ${err.message || err}`);
+    }
+  }
+
+  function openLightbox(url, caption) {
+    lightboxImg.src = url;
+    lightboxCaption.textContent = caption || "";
+    lightbox.hidden = false;
+  }
+
+  function closeLightbox() {
+    lightbox.hidden = true;
+    lightboxImg.removeAttribute("src");
+    lightboxCaption.textContent = "";
+  }
+
+  lightboxClose.addEventListener("click", closeLightbox);
+  lightbox.addEventListener("click", (e) => {
+    if (e.target === lightbox) closeLightbox();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !lightbox.hidden) closeLightbox();
+  });
+
+  function formatCapturedAt(epochSeconds) {
+    if (typeof epochSeconds !== "number" || !isFinite(epochSeconds)) return "";
+    const d = new Date(epochSeconds * 1000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return (
+      `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+      `${pad(d.getHours())}:${pad(d.getMinutes())}`
+    );
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   async function refreshRoutes() {
