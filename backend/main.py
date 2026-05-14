@@ -55,6 +55,10 @@ from backend.tts import synthesize
 logger = logging.getLogger(__name__)
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# Resolve the captures directory once. db_connection.CAPTURES_DIR is the same
+# Path the storage layer writes to via captures.save_jpeg, so the URL the UI
+# hits through the /captures mount lines up with the bytes on disk exactly.
+CAPTURES_DIR = db_connection.CAPTURES_DIR
 
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 
@@ -239,6 +243,96 @@ def _get_db_or_503():
         return db_connection.get_shared_connection()
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=f"memory not ready: {e}")
+
+
+def _image_url(image_path: str) -> str:
+    """Translate a stored image_path (e.g. ``data/captures/abc.jpg``) into
+    the public URL served by the /captures static mount.
+
+    `captures.save_jpeg` always writes into ``data/captures/`` with a
+    bare ``<sha256>.jpg`` filename, so the URL is always
+    ``/captures/<basename>``. Building it from ``Path(...).name`` keeps
+    us safe if an image_path ever has subdirectories in it.
+    """
+    return f"/captures/{Path(image_path).name}"
+
+
+@app.get("/api/places/{place_id}/views")
+async def api_place_views(place_id: int) -> JSONResponse:
+    """List every stored frame for one place.
+
+    Returns each row's ``id`` (needed for the per-view delete button)
+    plus an ``image_url`` already shaped for the /captures static
+    mount, so the UI can drop it straight into an ``<img src>`` tag.
+    """
+    conn = _get_db_or_503()
+    place = places_db.list_places_with_counts(conn)
+    summaries = {s.id: s for s in place}
+    summary = summaries.get(place_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail=f"place {place_id} not found")
+
+    views = places_db.list_place_views(conn, place_id)
+    return JSONResponse(
+        {
+            "place_id": place_id,
+            "name": summary.name,
+            "view_count": len(views),
+            "views": [
+                {
+                    "id": v.id,
+                    "image_path": v.image_path,
+                    "image_url": _image_url(v.image_path),
+                    "captured_at": v.captured_at,
+                    "heading_deg": v.heading_deg,
+                    "distance_cm": v.distance_cm,
+                }
+                for v in views
+            ],
+        }
+    )
+
+
+@app.delete("/api/training/place_views/{view_id}")
+async def api_delete_place_view(view_id: int) -> JSONResponse:
+    """Delete one stored frame: DB rows, embedding, and the JPEG on disk.
+
+    JPEG cleanup is conditional on no other row referencing the file --
+    `captures.save_jpeg` dedups by content hash, so the same bytes can
+    legitimately back multiple views. We only unlink when the reference
+    count drops to zero after the DB delete.
+    """
+    conn = _get_db_or_503()
+    deleted = places_db.delete_place_view(conn, view_id)
+    if deleted is None:
+        raise HTTPException(status_code=404, detail=f"view {view_id} not found")
+
+    refs = places_db.count_image_path_refs(conn, deleted.image_path)
+    file_removed = False
+    if refs == 0:
+        # The stored path is relative to the project root; resolve from
+        # the captures dir's parent so the join stays portable.
+        abs_path = CAPTURES_DIR.parent.parent / deleted.image_path
+        try:
+            if abs_path.is_file():
+                abs_path.unlink()
+                file_removed = True
+        except OSError:
+            logger.exception(
+                "failed to unlink JPEG for deleted view %d (%s)",
+                view_id,
+                abs_path,
+            )
+
+    return JSONResponse(
+        {
+            "view_id": view_id,
+            "place_id": deleted.place_id,
+            "image_path": deleted.image_path,
+            "file_removed": file_removed,
+            "remaining_refs": refs,
+        }
+    )
 
 
 @app.post("/api/training/captures")
@@ -584,7 +678,18 @@ async def _handle_audio(msg: dict[str, Any], send: Send, current_model: str) -> 
             logger.exception("tts failed")
 
 
+# Serve stored capture JPEGs read-only at /captures/<filename>. Backs the
+# Memory gallery in the training panel: each <img src="/captures/abc.jpg">
+# in the UI resolves to the same file the storage layer wrote via
+# captures.save_jpeg. Registered before the catch-all frontend mount so
+# the prefix wins, and the directory exists by the time we mount because
+# db_connection.connect() creates it on first DB open. Mounting before
+# DB init means the directory may not exist yet on a brand-new install;
+# create it defensively here so StaticFiles doesn't raise on startup.
+CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/captures", StaticFiles(directory=CAPTURES_DIR), name="captures")
+
 # Mount the frontend static files at the root. Registered LAST so that
-# /stream.mjpg and /ws win against this catch-all. html=True means a GET /
-# returns frontend/index.html.
+# /stream.mjpg, /ws, /api/*, and /captures/* win against this catch-all.
+# html=True means a GET / returns frontend/index.html.
 app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="frontend")
