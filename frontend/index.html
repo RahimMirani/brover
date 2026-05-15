@@ -25,6 +25,7 @@
         </span>
         <span class="hud__divider"></span>
         <span class="mode" id="modeBadge" data-mode="idle">IDLE</span>
+        <button class="hud__link hud__link--btn" id="trainToggle" aria-label="Toggle training panel" aria-pressed="false">TRAIN</button>
         <a class="hud__link" href="/analytics" aria-label="System analytics">ANALYTICS &rsaquo;</a>
       </div>
     </header>
@@ -94,6 +95,74 @@
         <span class="estop__text">E&#8209;STOP</span>
       </button>
     </footer>
+
+    <aside class="train" id="trainPanel" hidden aria-label="Manual training">
+      <div class="train__head">
+        <span class="train__title">MANUAL TRAINING</span>
+        <button class="train__close" id="trainClose" aria-label="Close training panel">&times;</button>
+      </div>
+
+      <div class="train__body">
+
+        <section class="train__section">
+          <div class="train__section-head">
+            <span>CAPTURE PLACE</span>
+            <span class="train__hint" id="capturePending">0 pending</span>
+          </div>
+          <button class="train__capture" id="captureBtn">
+            <span class="train__capture-dot"></span>
+            CAPTURE FRAME
+            <span class="train__capture-key">C</span>
+          </button>
+          <div class="train__captures" id="captureList"></div>
+          <datalist id="placeNames"></datalist>
+        </section>
+
+        <section class="train__section">
+          <div class="train__section-head">
+            <span>RECORD ROUTE</span>
+            <span class="train__status" id="routeStatus" data-state="idle">IDLE</span>
+          </div>
+          <div class="train__route">
+            <label class="train__field">
+              <span>FROM</span>
+              <input type="text" id="routeFromInput" list="placeNames" placeholder="e.g. kitchen" autocomplete="off">
+            </label>
+            <button class="train__btn train__btn--primary" id="routeStartBtn">START</button>
+          </div>
+          <div class="train__route">
+            <label class="train__field">
+              <span>TO</span>
+              <input type="text" id="routeToInput" list="placeNames" placeholder="e.g. bedroom" autocomplete="off" disabled>
+            </label>
+            <button class="train__btn train__btn--primary" id="routeStopBtn" disabled>STOP &amp; SAVE</button>
+          </div>
+          <button class="train__btn train__btn--ghost" id="routeCancelBtn" disabled>CANCEL RECORDING</button>
+        </section>
+
+        <section class="train__section">
+          <div class="train__section-head">
+            <span>MEMORY</span>
+            <button class="train__hint train__hint--btn" id="memoryRefresh" aria-label="Refresh memory lists">REFRESH</button>
+          </div>
+          <details class="train__details" open>
+            <summary>Places <span class="train__count" id="placesCount">0</span></summary>
+            <ul class="train__list" id="placesList"></ul>
+          </details>
+          <details class="train__details">
+            <summary>Routes <span class="train__count" id="routesCount">0</span></summary>
+            <ul class="train__list" id="routesList"></ul>
+          </details>
+        </section>
+
+      </div>
+    </aside>
+
+    <div class="lightbox" id="lightbox" hidden role="dialog" aria-label="Image preview">
+      <button class="lightbox__close" id="lightboxClose" aria-label="Close preview">&times;</button>
+      <img class="lightbox__img" id="lightboxImg" alt="">
+      <div class="lightbox__caption" id="lightboxCaption"></div>
+    </div>
 
   </div>
   <script src="app.js"></script>

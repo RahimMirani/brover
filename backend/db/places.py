@@ -66,6 +66,18 @@ class NearestPlaceView:
     distance: float
 
 
+@dataclass(frozen=True)
+class PlaceView:
+    """One stored frame for a place. Used by the gallery + per-view delete UI."""
+
+    id: int
+    place_id: int
+    image_path: str
+    heading_deg: float | None
+    distance_cm: float | None
+    captured_at: float
+
+
 def _pack(embedding: Sequence[float]) -> bytes:
     """Validate length, then pack into the byte layout sqlite-vec expects."""
     if len(embedding) != EMBEDDING_DIM:
@@ -229,6 +241,104 @@ def find_nearest_place_views(
         )
         for r in rows
     ]
+
+
+def list_place_views(conn: Connection, place_id: int) -> list[PlaceView]:
+    """Every stored frame for one place, oldest first.
+
+    Used by the gallery UI to render thumbnails per place. Sorted by
+    `captured_at ASC` so the order matches when you taught them, which
+    is the order a human is likely to want to scan ("here are the first
+    angles I taught, here are the later ones").
+    """
+    rows = conn.execute(
+        """
+        SELECT id, place_id, image_path, heading_deg, distance_cm, captured_at
+          FROM place_views
+         WHERE place_id = ?
+         ORDER BY captured_at ASC, id ASC
+        """,
+        (place_id,),
+    ).fetchall()
+    return [
+        PlaceView(
+            id=int(r["id"]),
+            place_id=int(r["place_id"]),
+            image_path=r["image_path"],
+            heading_deg=(None if r["heading_deg"] is None else float(r["heading_deg"])),
+            distance_cm=(None if r["distance_cm"] is None else float(r["distance_cm"])),
+            captured_at=float(r["captured_at"]),
+        )
+        for r in rows
+    ]
+
+
+def get_place_view(conn: Connection, view_id: int) -> PlaceView | None:
+    """Look up one stored frame by id. Returns None if it doesn't exist."""
+    row = conn.execute(
+        """
+        SELECT id, place_id, image_path, heading_deg, distance_cm, captured_at
+          FROM place_views
+         WHERE id = ?
+        """,
+        (view_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return PlaceView(
+        id=int(row["id"]),
+        place_id=int(row["place_id"]),
+        image_path=row["image_path"],
+        heading_deg=(None if row["heading_deg"] is None else float(row["heading_deg"])),
+        distance_cm=(None if row["distance_cm"] is None else float(row["distance_cm"])),
+        captured_at=float(row["captured_at"]),
+    )
+
+
+def count_image_path_refs(conn: Connection, image_path: str) -> int:
+    """Count how many place_views + route_steps rows reference `image_path`.
+
+    Used by the per-view delete path to decide whether the JPEG on disk
+    can be removed too. `captures.save_jpeg` dedups by content hash, so
+    two unrelated saves of the same frame land at the same file; deleting
+    one row should NOT delete the file if another row still points at it.
+    """
+    place_views_row = conn.execute(
+        "SELECT COUNT(*) AS n FROM place_views WHERE image_path = ?",
+        (image_path,),
+    ).fetchone()
+    route_steps_row = conn.execute(
+        "SELECT COUNT(*) AS n FROM route_steps WHERE image_path = ?",
+        (image_path,),
+    ).fetchone()
+    return int(place_views_row["n"]) + int(route_steps_row["n"])
+
+
+def delete_place_view(conn: Connection, view_id: int) -> PlaceView | None:
+    """Remove one stored frame (and its embedding) by id.
+
+    Returns the deleted row (so the caller can look up `image_path` for
+    on-disk cleanup) or None if no such id existed.
+
+    Same vec0 caveat as ``delete_place_by_name``: the SQL cascade does
+    not cover the virtual ``place_view_vectors`` table, so we delete
+    from it explicitly inside the same transaction. Skipping that step
+    would leak an orphan embedding that future similarity searches still
+    consider.
+    """
+    view = get_place_view(conn, view_id)
+    if view is None:
+        return None
+
+    try:
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM place_view_vectors WHERE rowid = ?", (view_id,))
+        conn.execute("DELETE FROM place_views WHERE id = ?", (view_id,))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    return view
 
 
 def delete_place_by_name(conn: Connection, name: str) -> bool:

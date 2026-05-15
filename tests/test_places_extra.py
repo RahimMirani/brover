@@ -91,6 +91,88 @@ class PlacesExtraTests(unittest.TestCase):
     def test_delete_place_returns_false_for_unknown(self) -> None:
         self.assertFalse(places.delete_place_by_name(self.conn, "nope"))
 
+    # -- list_place_views / get_place_view / delete_place_view ---------------
+
+    def test_list_place_views_orders_by_capture_time(self) -> None:
+        pid = places.get_or_create_place(self.conn, "kitchen")
+        v1 = places.add_place_view(
+            self.conn, place_id=pid, image_path="a.jpg", embedding=_vector(0.1)
+        )
+        v2 = places.add_place_view(
+            self.conn, place_id=pid, image_path="b.jpg", embedding=_vector(0.2)
+        )
+        v3 = places.add_place_view(
+            self.conn, place_id=pid, image_path="c.jpg", embedding=_vector(0.3)
+        )
+
+        views = places.list_place_views(self.conn, pid)
+        self.assertEqual([v.id for v in views], [v1, v2, v3])
+        self.assertEqual([v.image_path for v in views], ["a.jpg", "b.jpg", "c.jpg"])
+
+    def test_list_place_views_empty_for_unknown_place(self) -> None:
+        self.assertEqual(places.list_place_views(self.conn, 9999), [])
+
+    def test_get_place_view_returns_row_and_none(self) -> None:
+        pid = places.get_or_create_place(self.conn, "kitchen")
+        vid = places.add_place_view(
+            self.conn, place_id=pid, image_path="a.jpg", embedding=_vector(0.1)
+        )
+
+        found = places.get_place_view(self.conn, vid)
+        self.assertIsNotNone(found)
+        assert found is not None
+        self.assertEqual(found.id, vid)
+        self.assertEqual(found.place_id, pid)
+        self.assertEqual(found.image_path, "a.jpg")
+
+        self.assertIsNone(places.get_place_view(self.conn, 9999))
+
+    def test_delete_place_view_drops_row_and_vector(self) -> None:
+        pid = places.get_or_create_place(self.conn, "kitchen")
+        vid = places.add_place_view(
+            self.conn, place_id=pid, image_path="a.jpg", embedding=_vector(0.1)
+        )
+
+        deleted = places.delete_place_view(self.conn, vid)
+        self.assertIsNotNone(deleted)
+        assert deleted is not None
+        self.assertEqual(deleted.image_path, "a.jpg")
+
+        # place_views row gone
+        self.assertIsNone(places.get_place_view(self.conn, vid))
+        # vec0 row gone (orphan-embedding regression guard)
+        vec_row = self.conn.execute(
+            "SELECT rowid FROM place_view_vectors WHERE rowid = ?", (vid,)
+        ).fetchone()
+        self.assertIsNone(vec_row)
+
+    def test_delete_place_view_unknown_returns_none(self) -> None:
+        self.assertIsNone(places.delete_place_view(self.conn, 9999))
+
+    def test_delete_place_view_leaves_other_views_alone(self) -> None:
+        pid = places.get_or_create_place(self.conn, "kitchen")
+        v1 = places.add_place_view(
+            self.conn, place_id=pid, image_path="a.jpg", embedding=_vector(0.1)
+        )
+        v2 = places.add_place_view(
+            self.conn, place_id=pid, image_path="b.jpg", embedding=_vector(0.2)
+        )
+
+        places.delete_place_view(self.conn, v1)
+        remaining = places.list_place_views(self.conn, pid)
+        self.assertEqual([v.id for v in remaining], [v2])
+
+    def test_count_image_path_refs_counts_place_views_only(self) -> None:
+        pid = places.get_or_create_place(self.conn, "kitchen")
+        places.add_place_view(
+            self.conn, place_id=pid, image_path="shared.jpg", embedding=_vector(0.1)
+        )
+        places.add_place_view(
+            self.conn, place_id=pid, image_path="shared.jpg", embedding=_vector(0.2)
+        )
+        self.assertEqual(places.count_image_path_refs(self.conn, "shared.jpg"), 2)
+        self.assertEqual(places.count_image_path_refs(self.conn, "missing.jpg"), 0)
+
 
 if __name__ == "__main__":
     unittest.main()
